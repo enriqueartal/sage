@@ -1425,16 +1425,13 @@ def is_degenerated(f_tau, p=None, method='default'):
       the finite field.
     """
     bool_ = False
-    vars_ = f_tau.parent().gens()
+    S = f_tau.parent()
+    id = f_tau.jacobian_ideal() + S.ideal(f_tau)
     if p not in ZZ:
-        S = QQ[vars_]
-        id = S(f_tau).jacobian_ideal() + S * (S(f_tau))
         bool_ = prod(S.gens()) not in id.radical()
     else:
         if method == 'ideals':
-            S = GF(p)[vars_]
-            id = S(f_tau).jacobian_ideal() + S * (f_tau)
-            for xi in vars_:
+            for xi in S.gens():
                 id += S * (xi ** (p - 1) - 1)
                 # xi unity in Fp iff xi^{(p-1)-1}=0
             bool_ = 1 not in id
