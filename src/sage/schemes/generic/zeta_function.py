@@ -778,8 +778,8 @@ class ZetaFunctions():
         P = self._Gammaf
         if check != 'no_check':
             if local:
-                if not f.is_newton_non_degenerated(local=True,
-                                                   method=check, info=info):
+                if not self.is_newton_non_degenerated(local=True,
+                                                      method=check, info=info):
                     raise TypeError('degenerated wrt Newton')
             else:
                 if is_global_degenerated(f, method=check):
@@ -998,6 +998,7 @@ def faces(P):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, faces
         sage: R.<x, y, z> = QQ[]
         sage: f1 = x^3 + y^3 + z^4
         sage: P = newton_polyhedron(f1)
@@ -1014,6 +1015,7 @@ def proper_faces(P):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, proper_faces
         sage: R.<x, y, z> = QQ[]
         sage: f1 = x^3 + y^3 + z^4
         sage: P = newton_polyhedron(f1)
@@ -1056,6 +1058,7 @@ def compact_faces(P):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, compact_faces
         sage: R.<x, y, z> = QQ[]
         sage: f1 = x^3 + y^3 + z^4
         sage: P = newton_polyhedron(f1)
@@ -1220,6 +1223,8 @@ def simplicial_partition(cone):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, compact_faces, cone_from_face
+        sage: from sage.schemes.generic.zeta_function import simplicial_partition, proper_faces, face_divisors
         sage: R.<x, y, z> = QQ[]
         sage: g = x*y + z^3
         sage: P = newton_polyhedron(g)
@@ -1366,6 +1371,7 @@ def ftau(f, tau):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, ftau
         sage: R.<x,y,z> = QQ[]
         sage: f1 = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f1)
@@ -1467,6 +1473,7 @@ def Ntau(f, tau, p):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, Ntau
         sage: R.<x,y,z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f)
@@ -1494,6 +1501,7 @@ def Ltau(f, tau, p, abs_Ntau, s):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, Ltau
         sage: R.<x,y,z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f)
@@ -1529,6 +1537,7 @@ def Lgamma(f, p, abs_Ngamma, s):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, Lgamma
         sage: R.<x,y,z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f)
@@ -1560,6 +1569,7 @@ def Stau(f, tau, p, weights, s):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, Stau
         sage: R.<x,y,z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f)
@@ -1600,6 +1610,7 @@ def Jtau(tau, weights, ring_s):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, proper_faces, face_divisors, Jtau
         sage: R.<x,y,z> = QQ[]
         sage: f=x^2 + y*z
         sage: S.<s> = QQ[]
@@ -1644,6 +1655,7 @@ def Mtau(tau):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, Mtau, compact_faces
         sage: R.<x,y,z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f)
@@ -1695,6 +1707,7 @@ def face_volume(f, tau):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, face_volume
         sage: R.<x,y,z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f)
@@ -1729,6 +1742,7 @@ def face_divisors(d, faces_set):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, face_divisors
         sage: R.<x,y,z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f)
@@ -1784,6 +1798,7 @@ def is_global_degenerated(f, p=None, method='default'):
 
     EXAMPLES::
 
+        sage: from sage.schemes.generic.zeta_function import is_global_degenerated
         sage: R.<x,y,z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: is_global_degenerated(f)
