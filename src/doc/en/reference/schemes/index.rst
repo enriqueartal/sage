@@ -14,7 +14,7 @@ Schemes
    sage/schemes/generic/ambient_space
    sage/schemes/generic/algebraic_scheme
    sage/schemes/generic/hypersurface
-   sage/schemes/generic/zeta_function
+   sage/schemes/generic/igusa_top_zeta
 
    sage/schemes/generic/homset
    sage/schemes/generic/morphism
