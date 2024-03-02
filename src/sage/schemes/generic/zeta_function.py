@@ -87,15 +87,15 @@ class ZetaFunctions():
     Methods in ZetaFunctions:
 
     - ``cones_plot(self, **kwargs)``
-    - ``actual_faces(self, d=1, local=False)``
+    - ``actual_faces(self, d=1, compact=False)``
     - ``dict_info_poles(self, d=1, weights=None, local=False)``
     - ``get_newton_polyhedron(self)``
     - ``get_polyfaces_dictionary(self, keys = 'polynomials', compact=False)``
     - ``give_expected_pole_info(self, d=1, local=False, weights=None)``
     - ``give_info_facets(self, compact = False)``
     - ``give_info_newton(self, faces=False, cones=False, compact = False)``
-    - ``is_newton_non_degenerated(self, p=None, local=False, method='default', info = False)``
-    - ``newton_plot(self, point_size = 30, **kwargs)``
+    - ``is_newton_non_degenerated(self, p=None, local=False, method='default', info=False)``
+    - ``newton_plot(self, support=False, point_size = 30, **kwargs)``
     - ``igusa_zeta(self, p=None, dict_Ntau={}, local=False, weights=None, info=False, check='ideals')``
     - ``topological_zeta(self, d=1, local=False, weights=None, info=False, check='ideals')``
     - ``monodromy_zeta(self, char=False, info=False, check='ideals')``
@@ -191,7 +191,7 @@ class ZetaFunctions():
         """
         return fan_all_cones(self._Gammaf).plot(**kwargs)
 
-    def actual_faces(self, d=1, local=False):
+    def actual_faces(self, d=1, compact=False):
         r"""
         Return the list of faces taking ``d`` and ``local`` into account.
 
@@ -204,7 +204,7 @@ class ZetaFunctions():
           compact faces
         """
         P = self._Gammaf
-        if local:
+        if compact:
             faces_set = compact_faces(P)
         else:
             faces_set = proper_faces(P)
@@ -254,7 +254,7 @@ class ZetaFunctions():
         PL = P.face_lattice()
         # We need to keep the face lattice in order to
         # compare faces
-        faces_set = self.actual_faces(d=d, local=local)
+        faces_set = self.actual_faces(d=d, compact=local)
 
         all_prim_vect = set()
         for tau in faces_set:
@@ -339,10 +339,7 @@ class ZetaFunctions():
         - ``compact`` -- boolean (default: ``False``), if
           set to ``True``, consider only the compact faces.
         """
-        if compact:
-            faces_set = compact_faces(self._Gammaf)
-        else:
-            faces_set = proper_faces(self._Gammaf)
+        faces_set = self.actual_faces(compact=compact)
         if keys == 'polynomials':
             return {ftau(self._f, tau): tau for tau in faces_set}
         if keys == 'faces':
@@ -372,7 +369,7 @@ class ZetaFunctions():
         """
         f = self._f
         P = self._Gammaf
-        faces_set = self.actual_faces(d=d, local=local)
+        faces_set = self.actual_faces(d=d, compact=local)
         dict_poles = self.dict_info_poles(d=d, weights=weights, local=local)
 
         n_supp_by_face = [len(support_points_in_face(f, tau))
@@ -482,10 +479,7 @@ class ZetaFunctions():
         - ``compact`` -- boolean (default: ``False``), if ``True``
           consider only the compact faces
         """
-        if compact:
-            faces_set = compact_faces(self._Gammaf)
-        else:
-            faces_set = proper_faces(self._Gammaf)
+        faces_set = self.actual_faces(compact=compact)
         print("Newton's polyhedron of " + str(self._f) + ":")
         print("    support points = " + str(self._f.exponents()))
         print("    vertices = " +
@@ -507,7 +501,7 @@ class ZetaFunctions():
                 print("tau" + str(i) + ": " + face_info + cone_info)
 
     def is_newton_non_degenerated(self, p=None, local=False, info=False,
-                                  method='default'):
+                                  topological=False, method='default'):
         r"""Checks if the polynomial ``f`` is degenerated over
         `\mathbb{F}_p` (`p` prime) with respect \
         the faces of the polyhedron ``P`` (see [DH01]_).
@@ -520,6 +514,9 @@ class ZetaFunctions():
 
         - ``local`` -- boolean (default: ``False``), if ``True`` it checks
           degeneration for local case (only with respect the compact faces)
+
+        - ``topological`` -- boolean (default: ``False``), if ``True`` it
+          checks degeneration for the faces of the global polyhedron
 
         - ``info`` -- boolean (default: ``False``), if ``True`` it prints the
           first face for which the polynomial is degenerated
@@ -534,6 +531,8 @@ class ZetaFunctions():
               finite field.
         """
         f = self._f
+        if topological and not local:
+            return not is_global_degenerated(f, info=info, method=method)
         P = self._Gammaf
         if local:
             faces_set = compact_faces(P)
@@ -560,7 +559,7 @@ class ZetaFunctions():
                 return False
         return True
 
-    def newton_plot(self, point_size=30, **kwargs):
+    def newton_plot(self, support=False, point_size=30, **kwargs):
         r"""
         Returns the graphics of the associated Newton's polyhedron
         (for `n = 2, 3`) together with the support of `f`.
@@ -568,12 +567,20 @@ class ZetaFunctions():
 
         INPUT:
 
-        - ``point_size`` -- size of the ponits in plot (default: 30).
+        - ``support`` -- boolean (default: False), whether it plots the support
+          points outside the compact part of the Newton polyhedron
+
+        - ``point_size`` -- number (default: 30), size of the ponits in plot.
 
         - Other keyword options for ``plot()``.
         """
         n = self._f.parent().ngens()
+        boundary = self._Gammaf.faces(n - 1)
         pts = self._f.exponents()
+        if not support:
+            pts = [p for p in pts
+                   if any(tuple(p) in [tuple(v) for v in e.vertices()]
+                          for e in boundary)]
         if n == 2:
             plot_pts = sum([point(p, color='red', size=point_size)
                             for p in pts])
@@ -777,16 +784,13 @@ class ZetaFunctions():
         s = ring_s.gen(0)
         P = self._Gammaf
         if check != 'no_check':
-            if local:
-                if not self.is_newton_non_degenerated(local=True,
-                                                      method=check, info=info):
-                    raise TypeError('degenerated wrt Newton')
-            else:
-                if is_global_degenerated(f, method=check):
-                    raise TypeError('degenerated wrt Newton')
+            if not self.is_newton_non_degenerated(local=True,
+                                                  topological=True,
+                                                  method=check, info=info):
+                raise TypeError('degenerated wrt Newton')
         else:
             print("Warning: not checking the non-degeneracy condition!")
-        faces_set = self.actual_faces(d=d, local=local)
+        faces_set = self.actual_faces(d=d, compact=local)
         if local or d > 1:
             result = ring_s.zero()
         else:
@@ -937,7 +941,7 @@ class ZetaFunctions():
 
     def Mtaus(self):
         r"""
-        Return a dictionary assigning to the vertices of each `\tau`
+        Return a dictionary assigning to each `\tau`
         the value `M_\tau` as a rational function in `s`.
 
         EXAMPLES::
@@ -957,7 +961,7 @@ class ZetaFunctions():
 
     def Jtaus(self, ring_s, weights=None):
         r"""
-        Return a dictionary assigning to the vertices of each `\tau`
+        Return a dictionary assigning to each `\tau`
         the value `M_\tau` as a rational function in `s`.
 
         EXAMPLES::
@@ -974,6 +978,26 @@ class ZetaFunctions():
              (A vertex at (5, 3),): (2/57) * (s + 5/19)^-1 * (s + 1/3)^-1}
         """
         return {tuple(tau.vertices()): Jtau(tau, weights, ring_s)[0]
+                for tau in compact_faces(self._Gammaf)}
+
+    def ntaus(self):
+        r"""
+        Return a dictionary assigning to each `\tau`
+        the value `n_\tau`.
+
+        EXAMPLES::
+
+            sage: R.<x,y> = QQ[]
+            sage: f = y^7 + x^2 * y^5 + x^5 * y^3
+            sage: zex = ZetaFunctions(f)
+            sage: zex.ntaus()
+            {(A vertex at (0, 7),): 7,
+             (A vertex at (0, 7), A vertex at (2, 5)): 7,
+             (A vertex at (2, 5),): 1,
+             (A vertex at (2, 5), A vertex at (5, 3)): 19,
+             (A vertex at (5, 3),): 1}
+        """
+        return {tuple(tau.vertices()): ntau(tau)
                 for tau in compact_faces(self._Gammaf)}
 
 # ------------------------AUXILIARY FUNCTIONS------------------------
@@ -1734,6 +1758,32 @@ def face_volume(f, tau):
     return result
 
 
+def ntau(tau):
+    r"""
+    Return `m(\Delta_\tau) = \gcd\{m(a) \mid a\in\Delta_\tau\cap\ZZ^n\}`
+    where `\Delta_\tau` is the associated cone of `\tau`.
+
+    EXAMPLES::
+
+        sage: from sage.schemes.generic.zeta_function import newton_polyhedron, ntau
+        sage: R.<x,y,z> = QQ[]
+        sage: f = x^2 - y^2 + z^3
+        sage: P = newton_polyhedron(f)
+        sage: tau = P.faces(1)[0]
+        sage: ntau(tau)
+        6
+    """
+    c = cone_from_face(tau)
+    F = simplicial_partition(c)
+    L_vectors = []
+    # We need to evaluate m over the basis of the cone and the
+    # integral points views above.
+    for scone in F:
+        L_vectors += integral_vectors(scone)
+        L_vectors += primitive_vectors_cone(scone)
+    return gcd(m_vect(i, tau) for i in L_vectors)
+
+
 def face_divisors(d, faces_set):
     r"""
     Return a list of faces `\tau` in ``faces_set`` such that ``d`` divides
@@ -1760,23 +1810,10 @@ def face_divisors(d, faces_set):
     """
     if d == 1:
         return faces_set
-    L_faces = []
-    for tau in faces_set:
-        c = cone_from_face(tau)
-        F = simplicial_partition(c)
-        L_vectors = []
-        # We need to evaluate m over the basis of the cone and the
-        # integral points views above.
-        for scone in F:
-            L_vectors += integral_vectors(scone)
-            L_vectors += primitive_vectors_cone(scone)
-        ell = gcd(m_vect(i, tau) for i in L_vectors)
-        if not ell % d:
-            L_faces.append(tau)
-    return L_faces
+    return [tau for tau in faces_set if not ntau(tau) % d]
 
 
-def is_global_degenerated(f, p=None, method='default'):
+def is_global_degenerated(f, p=None, info=False, method='default'):
     r"""
     Check if the polynomial ``f`` is degenerated over `\mathbb{F}_p`
     (`p` prime) with respect to the faces of the Global Newton
@@ -1809,15 +1846,15 @@ def is_global_degenerated(f, p=None, method='default'):
     for tau in faces(Q)[1:]:
         f_tau = ftau(f, tau)
         if is_degenerated(f_tau, p, method):
-            print("The formula for the Topological zeta function " +
-                  "is not valid:")
-            if p not in ZZ:
-                print("The polynomial is degenerated at least " +
-                      "with respect to the face tau = {" +
-                      face_info_output(tau) + "} over the complex numbers!")
-            else:
-                print("The polynomial is degenerated at least " +
-                      "with respect to the face tau = {" +
-                      face_info_output(tau) + "} over GF(" + str(p) + ")!")
+            if info:
+                if p not in ZZ:
+                    print("The polynomial is degenerated at least " +
+                          "with respect to the face tau = {" +
+                          face_info_output(tau) +
+                          "} over the complex numbers!")
+                else:
+                    print("The polynomial is degenerated at least " +
+                          "with respect to the face tau = {" +
+                          face_info_output(tau) + "} over GF(" + str(p) + ")!")
             return True
     return False
