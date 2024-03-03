@@ -863,7 +863,7 @@ class ZetaFunctions():
 
             sage: R.<x,y> = QQ[]
             sage: zex1 = ZetaFunctions(y^7+x^2*y^5+x^5*y^3)
-            sage: zex1.monodromy_zeta(char = True, cyclo_info=True)
+            sage: zex1.monodromy_zeta(char = True, cyclo_info=True).factor()
             The characteristic polynomial of the monodromy is (t - 1)^3 *
             (t^6 + t^5 + t^4 + t^3 + t^2 + t + 1) * (t^18 + t^17 + t^16 +
             t^15 + t^14 + t^13 + t^12 + t^11 + t^10 + t^9 + t^8 + t^7 +
@@ -883,7 +883,7 @@ class ZetaFunctions():
 
             sage: S.<x,y,z> = QQ[]
             sage: zex2 = ZetaFunctions(x*y + z^3)
-            sage: zex2.monodromy_zeta(char = True, cyclo_info=True)
+            sage: zex2.monodromy_zeta(char = True, cyclo_info=True).factor()
             The characteristic polynomial of the monodromy is t^2 + t + 1
             ======
             The decomposition in cyclotomic product is:
@@ -940,7 +940,7 @@ class ZetaFunctions():
                 cyclo_str += " with multiplicity " + str(cyclotomic[c])
             cyclo_str += "\n======"
             print(cyclo_str)
-        return result.factor()
+        return result
 
     def Mtaus(self):
         r"""
