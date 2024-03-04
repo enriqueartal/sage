@@ -213,7 +213,6 @@ class ZetaFunctions():
             faces_set = proper_faces(P)
         return face_divisors(d, faces_set)
 
-
     def dict_info_poles(self, d=1, weights=None, local=False):
         r"""
         Return a dictionary where the keys are the candidate real poles of
