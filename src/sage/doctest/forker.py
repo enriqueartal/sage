@@ -91,8 +91,7 @@ if typing.TYPE_CHECKING:
 # With OS X, Python 3.8 defaults to use 'spawn' instead of 'fork' in
 # multiprocessing, and Sage doctesting doesn't work with 'spawn'. See
 # trac #27754.
-if platform.system() == 'Darwin':
-    multiprocessing.set_start_method('fork', force=True)
+multiprocessing.set_start_method('fork', force=True)
 
 
 def _sorted_dict_pprinter_factory(start, end):

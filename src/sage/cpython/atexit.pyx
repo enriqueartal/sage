@@ -171,8 +171,11 @@ cdef extern from *:
         return state.callbacks;
     }
     
-    // Dummy function for Python 3.14+ (never called)
+    // Dummy function for Python 3.14+ (should never be called)
     static atexit_callback_struct** get_atexit_callbacks_array(PyObject *self) {
+        PyErr_SetString(PyExc_RuntimeError, 
+            "get_atexit_callbacks_array() called on Python 3.14+. "
+            "This is a bug in sage.cpython.atexit version detection.");
         return NULL;
     }
     #else
@@ -188,8 +191,11 @@ cdef extern from *:
         return (atexit_callback_struct**)state.callbacks;
     }
     
-    // Dummy function for Python < 3.14 (never called)
+    // Dummy function for Python < 3.14 (should never be called)
     static PyObject* get_atexit_callbacks_list(PyObject *self) {
+        PyErr_SetString(PyExc_RuntimeError, 
+            "get_atexit_callbacks_list() called on Python < 3.14. "
+            "This is a bug in sage.cpython.atexit version detection.");
         return NULL;
     }
     #endif
@@ -216,7 +222,8 @@ def _get_exithandlers():
     if sys.version_info >= (3, 14):
         callbacks_list = <object>get_atexit_callbacks_list(atexit)
         if callbacks_list is None:
-            return exithandlers
+            # An error occurred (shouldn't happen unless there's a version detection bug)
+            raise RuntimeError("Failed to get atexit callbacks list")
         # callbacks is a list of tuples: [(func, args, kwargs), ...]
         # Normalize kwargs to ensure it's always a dict (not None)
         # Note: In Python 3.14+, atexit stores callbacks in LIFO order
@@ -230,6 +237,9 @@ def _get_exithandlers():
     else:
         # Python < 3.14 uses C array
         callbacks = get_atexit_callbacks_array(atexit)
+        if callbacks is NULL:
+            # An error occurred (shouldn't happen unless there's a version detection bug)
+            raise RuntimeError("Failed to get atexit callbacks array")
         for idx in range(atexit._ncallbacks()):
             callback = callbacks[idx][0]
             if callback.kwargs:

@@ -325,7 +325,14 @@ class SpecialJordanAlgebra(JordanAlgebra):
         B = self._A.basis()
         return Family(B.keys(), lambda x: self.element_class(self, B[x]), name="Term map")
 
-    algebra_generators = basis
+    def algebra_generators(self):
+        B = self._A.basis()
+        K = B.keys()
+        try:
+            len(K)
+        except NotImplementedError:
+            raise NotImplementedError("infinite set")
+        return Family(K, lambda x: self.element_class(self, B[x]), name="Term map")
 
     # TODO: Keep this until we can better handle R.<...> shorthand
     def gens(self) -> tuple:
@@ -347,7 +354,13 @@ class SpecialJordanAlgebra(JordanAlgebra):
             ...
             NotImplementedError: infinite set
         """
-        return tuple(self.algebra_generators())
+        G = self.algebra_generators()
+        # If G is infinite, len(G) will raise NotImplementedError('infinite set')
+        try:
+            len(G)
+        except NotImplementedError:
+            raise
+        return tuple(G)
 
     @cached_method
     def zero(self):

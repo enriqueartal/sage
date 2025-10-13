@@ -21,6 +21,8 @@ log = logging.getLogger()
 
 from sage_bootstrap.stdio import flush
 from sage_bootstrap.compat import urllib
+import urllib.request
+import urllib.error
 
 
 class ProgressBar(object):
@@ -99,13 +101,6 @@ class Download(object):
         self.progress_stream = sys.stderr if isinstance(progress, bool) else progress
         self.ignore_errors = ignore_errors
 
-    def http_error_default(self, url, fp, errcode, errmsg, headers):
-        """
-        Callback for the URLopener to raise an exception on HTTP errors
-        """
-        fp.close()
-        raise DownloadError(errcode, errmsg, url)
-
     def start_progress_bar(self):
         if self.progress:
             self.progress_bar = ProgressBar(self.progress_stream)
@@ -120,19 +115,22 @@ class Download(object):
             self.progress_bar.error_stop()
     
     def run(self):
-        opener = urllib.FancyURLopener()
-        opener.http_error_default = self.http_error_default
         self.start_progress_bar()
         try:
             if self.progress:
-                filename, info = opener.retrieve(
+                filename, info = urllib.request.urlretrieve(
                     self.url, self.destination, self.progress_bar)
             else:
-                filename, info = opener.retrieve(
+                filename, info = urllib.request.urlretrieve(
                     self.url, self.destination)
         except IOError as error:
             self.error_progress_bar()
             log.error(error)
             if not self.ignore_errors:
                 raise error
+        except urllib.error.HTTPError as error:
+            self.error_progress_bar()
+            log.error(error)
+            if not self.ignore_errors:
+                raise DownloadError(error.code, error.reason, self.url)
         self.success_progress_bar()
