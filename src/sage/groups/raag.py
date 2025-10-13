@@ -22,22 +22,22 @@ AUTHORS:
 # (at your option) any later version.
 #                  https://www.gnu.org/licenses/
 # ****************************************************************************
-from sage.libs.gap.element import GapElement
-
-from sage.misc.cachefunc import cached_method
-from sage.structure.richcmp import richcmp
-from sage.groups.finitely_presented import FinitelyPresentedGroup, FinitelyPresentedGroupElement
-from sage.groups.free_group import FreeGroup
-from sage.groups.artin import ArtinGroup, ArtinGroupElement
-from sage.graphs.graph import Graph
-from sage.combinat.root_system.coxeter_matrix import CoxeterMatrix
-from sage.combinat.root_system.coxeter_group import CoxeterGroup
-
-from sage.combinat.free_module import CombinatorialFreeModule
+from sage.algebras.clifford_algebra_element import CohomologyRAAGElement
+from sage.categories.algebras_with_basis import AlgebrasWithBasis
 from sage.categories.fields import Fields
 from sage.categories.groups import Groups
-from sage.categories.algebras_with_basis import AlgebrasWithBasis
-from sage.algebras.clifford_algebra_element import CohomologyRAAGElement
+from sage.combinat.free_module import CombinatorialFreeModule
+from sage.combinat.root_system.coxeter_group import CoxeterGroup
+from sage.combinat.root_system.coxeter_matrix import CoxeterMatrix
+from sage.graphs.graph import Graph
+from sage.groups.artin import ArtinGroup, ArtinGroupElement
+from sage.groups.finitely_presented import (FinitelyPresentedGroup,
+                                            FinitelyPresentedGroupElement)
+from sage.groups.free_group import FreeGroup
+from sage.libs.gap.element import GapElement
+from sage.misc.cachefunc import cached_method
+from sage.sets.family import Family
+from sage.structure.richcmp import richcmp
 from sage.typeset.ascii_art import ascii_art
 from sage.typeset.unicode_art import unicode_art
 
@@ -303,7 +303,7 @@ class RightAngledArtinGroup(ArtinGroup):
             1
         """
         if isinstance(x, RightAngledArtinGroup.Element):
-            raise ValueError("there is no coercion from {} into {}".format(x.parent(), self))
+            raise ValueError(f"there is no coercion from {x.parent()} into {self}")
         if x == 1:
             return self.one()
         verts = self._graph.vertices(sort=True)
@@ -782,10 +782,11 @@ class CohomologyRAAG(CombinatorialFreeModule):
             sage: H.gen(1)
             e1
         """
-        return self._from_dict({(i,): self.base_ring().one()}, remove_zeros=False)
+        return self._from_dict({(i,): self.base_ring().one()},
+                               remove_zeros=False)
 
     @cached_method
-    def one_basis(self):
+    def one_basis(self) -> tuple:
         """
         Return the basis element indexing `1` of ``self``.
 
@@ -800,7 +801,7 @@ class CohomologyRAAG(CombinatorialFreeModule):
         return ()
 
     @cached_method
-    def algebra_generators(self):
+    def algebra_generators(self) -> Family:
         """
         Return the algebra generators of ``self``.
 
@@ -811,25 +812,17 @@ class CohomologyRAAG(CombinatorialFreeModule):
             sage: H = A.cohomology()
             sage: H.algebra_generators()
             Finite family {0: e0, 1: e1, 2: e2, 3: e3}
+
+        TESTS::
+
+            sage: H.gens()
+            Finite family {0: e0, 1: e1, 2: e2, 3: e3}
         """
         V = self._group._graph.vertices(True)
         d = {x: self.gen(i) for i, x in enumerate(V)}
-        from sage.sets.family import Family
         return Family(V, lambda x: d[x])
 
-    def gens(self) -> tuple:
-        r"""
-        Return the generators of ``self`` (as an algebra).
-
-        EXAMPLES::
-
-            sage: C4 = graphs.CycleGraph(4)
-            sage: A = groups.misc.RightAngledArtin(C4)
-            sage: H = A.cohomology()
-            sage: H.gens()
-            (e0, e1, e2, e3)
-        """
-        return tuple(self.algebra_generators())
+    gens = algebra_generators
 
     def ngens(self):
         """

@@ -22,7 +22,8 @@ from sage.combinat.permutation import (
     Permutations,
     from_permutation_group_element,
 )
-from sage.combinat.permutation_cython import left_action_same_n, right_action_same_n
+from sage.combinat.permutation_cython import (left_action_same_n,
+                                              right_action_same_n)
 from sage.combinat.skew_tableau import SkewTableau
 from sage.combinat.tableau import (
     StandardTableaux,
@@ -38,6 +39,7 @@ from sage.misc.persist import register_unpickle_override
 from sage.modules.free_module_element import vector
 from sage.rings.polynomial.polynomial_ring_constructor import PolynomialRing
 from sage.rings.rational_field import QQ
+from sage.sets.family import Family
 
 lazy_import('sage.groups.perm_gps.permgroup_element',
             'PermutationGroupElement')
@@ -244,7 +246,7 @@ def SymmetricGroupAlgebra(R, W, category=None):
 
 class SymmetricGroupAlgebra_n(GroupAlgebra_class):
 
-    def __init__(self, R, W, category):
+    def __init__(self, R, W, category) -> None:
         """
         TESTS::
 
@@ -1355,10 +1357,9 @@ class SymmetricGroupAlgebra_n(GroupAlgebra_class):
         return Elad * eprod
 
     @cached_method
-    def algebra_generators(self):
+    def algebra_generators(self) -> Family:
         r"""
-        Return generators of this group algebra (as algebra) as a
-        list of permutations.
+        Return generators of this group algebra (as algebra).
 
         The generators used for the group algebra of `S_n` are the
         transposition `(2, 1)` and the `n`-cycle `(1, 2, \ldots, n)`,
@@ -1386,7 +1387,6 @@ class SymmetricGroupAlgebra_n(GroupAlgebra_class):
             sage: M = C.module_morphism(lambda x: S3.zero(), codomain=S3)
             sage: M.register_as_coercion()
         """
-        from sage.sets.family import Family
         if self.n <= 1:
             return Family([])
         a = list(range(1, self.n + 1))
@@ -3574,7 +3574,7 @@ class HeckeAlgebraSymmetricGroup_generic(CombinatorialFreeModule):
 
 class HeckeAlgebraSymmetricGroup_t(HeckeAlgebraSymmetricGroup_generic):
 
-    def __init__(self, R, n, q=None):
+    def __init__(self, R, n, q=None) -> None:
         """
         TESTS::
 
@@ -3686,16 +3686,16 @@ class HeckeAlgebraSymmetricGroup_t(HeckeAlgebraSymmetricGroup_generic):
                                list(range(i + 2, self.n + 1))))
         # The permutation here is simply the transposition (i, i+1).
 
-    def algebra_generators(self):
+    def algebra_generators(self) -> tuple:
         """
         Return the generators of the algebra.
 
         EXAMPLES::
 
             sage: HeckeAlgebraSymmetricGroupT(QQ,3).algebra_generators()
-            [T[2, 1, 3], T[1, 3, 2]]
+            (T[2, 1, 3], T[1, 3, 2])
         """
-        return [self.t(i) for i in range(1, self.n)]
+        return tuple(self.t(i) for i in range(1, self.n))
 
     def jucys_murphy(self, k):
         r"""

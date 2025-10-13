@@ -138,6 +138,7 @@ from sage.rings.polynomial.multi_polynomial_ideal import NCPolynomialIdeal
 
 from sage.rings.polynomial.polydict import ETuple
 from sage.rings.ring import CommutativeRing
+from sage.sets.family import Family
 from sage.structure.category_object cimport check_default_category
 from sage.structure.element cimport CommutativeRingElement, Element, RingElement
 from sage.structure.factory import UniqueFactory
@@ -615,7 +616,8 @@ cdef class NCPolynomialRing_plural(Ring):
            True
         """
         from sage.algebras.free_algebra import FreeAlgebra
-        return FreeAlgebra(self.base_ring(), names=self.variable_names(), order=self.term_order())
+        return FreeAlgebra(self.base_ring(), names=self.variable_names(),
+                           order=self.term_order())
 
     def __hash__(self):
         """
@@ -708,7 +710,7 @@ cdef class NCPolynomialRing_plural(Ring):
         """
         return False
 
-    def _repr_(self):
+    def _repr_(self) -> str:
         """
         EXAMPLES::
 
@@ -861,7 +863,7 @@ cdef class NCPolynomialRing_plural(Ring):
 
         return new_NCP(self,_p)
 
-    def algebra_generators(self):
+    def algebra_generators(self) -> Family:
         r"""
         Return the algebra generators of ``self``.
 
@@ -872,7 +874,6 @@ cdef class NCPolynomialRing_plural(Ring):
             sage: P.algebra_generators()
             Finite family {'x': x, 'y': y, 'z': z}
         """
-        from sage.sets.family import Family
         return Family(self.gens_dict())
 
     def ideal(self, *gens, **kwds):
@@ -1846,7 +1847,7 @@ cdef class NCPolynomial_plural(RingElement):
         id_Delete(&_I, r)
         return new_NCP(parent,res)
 
-    def _repr_(self):
+    def _repr_(self) -> str:
         """
         EXAMPLES::
 

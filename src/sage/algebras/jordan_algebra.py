@@ -311,7 +311,7 @@ class SpecialJordanAlgebra(JordanAlgebra):
         return self.element_class(self, self._A.an_element())
 
     @cached_method
-    def basis(self):
+    def basis(self) -> Family:
         """
         Return the basis of ``self``.
 
@@ -323,12 +323,13 @@ class SpecialJordanAlgebra(JordanAlgebra):
             Lazy family (Term map(i))_{i in Free monoid on 3 generators (x, y, z)}
         """
         B = self._A.basis()
-        return Family(B.keys(), lambda x: self.element_class(self, B[x]), name="Term map")
+        return Family(B.keys(),
+                      lambda x: self.element_class(self, B[x]), name="Term map")
 
     algebra_generators = basis
 
     # TODO: Keep this until we can better handle R.<...> shorthand
-    def gens(self) -> tuple:
+    def gens(self) -> Family:
         """
         Return the generators of ``self``.
 
@@ -338,16 +339,16 @@ class SpecialJordanAlgebra(JordanAlgebra):
             sage: C = CombinatorialFreeModule(QQ, ['x','y','z'], category=cat)
             sage: J = JordanAlgebra(C)
             sage: J.gens()
-            (B['x'], B['y'], B['z'])
+            Finite family {'x': B['x'], 'y': B['y'], 'z': B['z']}
 
             sage: F.<x,y,z> = FreeAlgebra(QQ)
             sage: J = JordanAlgebra(F)
             sage: J.gens()
             Traceback (most recent call last):
             ...
-            NotImplementedError: infinite set
+            Lazy family (Term map(i))_{i in Free monoid on 3 generators (x, y, z)}
         """
-        return tuple(self.algebra_generators())
+        return self.algebra_generators()
 
     @cached_method
     def zero(self):
@@ -741,7 +742,7 @@ class JordanAlgebraSymmetricBilinear(JordanAlgebra):
         return self._generic_coerce_map(self.base_ring())
 
     @cached_method
-    def basis(self):
+    def basis(self) -> Family:
         """
         Return a basis of ``self``.
 
@@ -763,7 +764,7 @@ class JordanAlgebraSymmetricBilinear(JordanAlgebra):
 
     algebra_generators = basis
 
-    def gens(self) -> tuple:
+    def gens(self) -> Family:
         """
         Return the generators of ``self``.
 
@@ -772,9 +773,9 @@ class JordanAlgebraSymmetricBilinear(JordanAlgebra):
             sage: m = matrix([[0,1],[1,1]])
             sage: J = JordanAlgebra(m)
             sage: J.gens()
-            (1 + (0, 0), 0 + (1, 0), 0 + (0, 1))
+            Family (1 + (0, 0), 0 + (1, 0), 0 + (0, 1))
         """
-        return tuple(self.algebra_generators())
+        return self.algebra_generators()
 
     @cached_method
     def zero(self):
@@ -1270,7 +1271,7 @@ class ExceptionalJordanAlgebra(JordanAlgebra):
                     tester.assertEqual(val.imag_part(), zerO)
 
     @cached_method
-    def basis(self):
+    def basis(self) -> Family:
         r"""
         Return a basis of ``self``.
 
@@ -1315,7 +1316,7 @@ class ExceptionalJordanAlgebra(JordanAlgebra):
 
     algebra_generators = basis
 
-    def gens(self) -> tuple:
+    def gens(self) -> Family:
         """
         Return the generators of ``self``.
 
@@ -1337,7 +1338,7 @@ class ExceptionalJordanAlgebra(JordanAlgebra):
             [ 0  0  k]
             [ 0 -k  0]
         """
-        return tuple(self.algebra_generators())
+        return self.basis()
 
     @cached_method
     def zero(self):
