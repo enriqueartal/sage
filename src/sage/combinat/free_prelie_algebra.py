@@ -310,7 +310,7 @@ class FreePreLieAlgebra(CombinatorialFreeModule):
         return G[G.keys().unrank(i)]
 
     @cached_method
-    def algebra_generators(self):
+    def algebra_generators(self) -> Family:
         r"""
         Return the generators of this algebra.
 
@@ -327,6 +327,12 @@ class FreePreLieAlgebra(CombinatorialFreeModule):
             sage: A = algebras.FreePreLie(QQ, ['x1','x2'])
             sage: list(A.algebra_generators())
             [B[x1[]], B[x2[]]]
+
+        TESTS::
+
+            sage: A = algebras.FreePreLie(ZZ, 'fgh')
+            sage: A.gens()
+            Finite family {'f': B[f[]], 'g': B[g[]], 'h': B[h[]]}
         """
         Trees = self.basis().keys()
         return Family(self._alphabet, lambda a: self.monomial(Trees([], a)))
@@ -348,17 +354,7 @@ class FreePreLieAlgebra(CombinatorialFreeModule):
         """
         return FreePreLieAlgebra(R, names=self.variable_names())
 
-    def gens(self) -> tuple:
-        """
-        Return the generators of ``self`` (as an algebra).
-
-        EXAMPLES::
-
-            sage: A = algebras.FreePreLie(ZZ, 'fgh')
-            sage: A.gens()
-            (B[f[]], B[g[]], B[h[]])
-        """
-        return tuple(self.algebra_generators())
+    gens = algebra_generators
 
     def degree_on_basis(self, t):
         """

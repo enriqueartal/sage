@@ -9,12 +9,12 @@ AUTHORS:
   Jordan algebra
 """
 
-#*****************************************************************************
+# ***************************************************************************
 #  Copyright (C) 2014, 2023 Travis Scrimshaw <tscrim at ucdavis.edu>
 #
 #  Distributed under the terms of the GNU General Public License (GPL)
 #                  https://www.gnu.org/licenses/
-#*****************************************************************************
+# ***************************************************************************
 
 from sage.structure.parent import Parent
 from sage.structure.unique_representation import UniqueRepresentation
@@ -209,7 +209,7 @@ class JordanAlgebra(UniqueRepresentation, Parent):
         if not arg1.is_symmetric():
             raise ValueError("the bilinear form is not symmetric")
 
-        arg1 = arg1.change_ring(arg0) # This makes a copy
+        arg1 = arg1.change_ring(arg0)  # This makes a copy
         arg1.set_immutable()
         return JordanAlgebraSymmetricBilinear(arg0, arg1, names=names)
 
@@ -311,7 +311,7 @@ class SpecialJordanAlgebra(JordanAlgebra):
         return self.element_class(self, self._A.an_element())
 
     @cached_method
-    def basis(self):
+    def basis(self) -> Family:
         """
         Return the basis of ``self``.
 
@@ -323,19 +323,13 @@ class SpecialJordanAlgebra(JordanAlgebra):
             Lazy family (Term map(i))_{i in Free monoid on 3 generators (x, y, z)}
         """
         B = self._A.basis()
-        return Family(B.keys(), lambda x: self.element_class(self, B[x]), name="Term map")
+        return Family(B.keys(),
+                      lambda x: self.element_class(self, B[x]), name="Term map")
 
-    def algebra_generators(self):
-        B = self._A.basis()
-        K = B.keys()
-        try:
-            len(K)
-        except NotImplementedError:
-            raise NotImplementedError("infinite set")
-        return Family(K, lambda x: self.element_class(self, B[x]), name="Term map")
+    algebra_generators = basis
 
     # TODO: Keep this until we can better handle R.<...> shorthand
-    def gens(self) -> tuple:
+    def gens(self) -> Family:
         """
         Return the generators of ``self``.
 
@@ -345,22 +339,14 @@ class SpecialJordanAlgebra(JordanAlgebra):
             sage: C = CombinatorialFreeModule(QQ, ['x','y','z'], category=cat)
             sage: J = JordanAlgebra(C)
             sage: J.gens()
-            (B['x'], B['y'], B['z'])
+            Finite family {'x': B['x'], 'y': B['y'], 'z': B['z']}
 
             sage: F.<x,y,z> = FreeAlgebra(QQ)
             sage: J = JordanAlgebra(F)
             sage: J.gens()
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: infinite set
+            Lazy family (Term map(i))_{i in Free monoid on 3 generators (x, y, z)}
         """
-        G = self.algebra_generators()
-        # If G is infinite, len(G) will raise NotImplementedError('infinite set')
-        try:
-            len(G)
-        except NotImplementedError:
-            raise
-        return tuple(G)
+        return self.algebra_generators()
 
     @cached_method
     def zero(self):
@@ -754,7 +740,7 @@ class JordanAlgebraSymmetricBilinear(JordanAlgebra):
         return self._generic_coerce_map(self.base_ring())
 
     @cached_method
-    def basis(self):
+    def basis(self) -> Family:
         """
         Return a basis of ``self``.
 
@@ -776,7 +762,7 @@ class JordanAlgebraSymmetricBilinear(JordanAlgebra):
 
     algebra_generators = basis
 
-    def gens(self) -> tuple:
+    def gens(self) -> Family:
         """
         Return the generators of ``self``.
 
@@ -785,9 +771,9 @@ class JordanAlgebraSymmetricBilinear(JordanAlgebra):
             sage: m = matrix([[0,1],[1,1]])
             sage: J = JordanAlgebra(m)
             sage: J.gens()
-            (1 + (0, 0), 0 + (1, 0), 0 + (0, 1))
+            Family (1 + (0, 0), 0 + (1, 0), 0 + (0, 1))
         """
-        return tuple(self.algebra_generators())
+        return self.algebra_generators()
 
     @cached_method
     def zero(self):
@@ -987,7 +973,7 @@ class JordanAlgebraSymmetricBilinear(JordanAlgebra):
             P = self.parent()
             return self.__class__(P,
                                   self._s * other._s
-                                   + (self._v * P._form * other._v.column())[0],
+                                  + (self._v * P._form * other._v.column())[0],
                                   other._s * self._v + self._s * other._v)
 
         def _lmul_(self, other):
@@ -1036,8 +1022,8 @@ class JordanAlgebraSymmetricBilinear(JordanAlgebra):
                 {0: 1, 1: 2, 2: -1}
             """
             d = {0: self._s}
-            for i,c in enumerate(self._v):
-                d[i+1] = c
+            for i, c in enumerate(self._v):
+                d[i + 1] = c
             return d
 
         def trace(self):
@@ -1271,8 +1257,8 @@ class ExceptionalJordanAlgebra(JordanAlgebra):
                  [SD[3].conjugate(), SD[1], SD[5]],
                  [SD[4].conjugate(), SD[5].conjugate(), SD[2]]]
             Y = [[OD[0], OD[3], OD[4]],
-                  [OD[3].conjugate(), OD[1], OD[5]],
-                  [OD[4].conjugate(), OD[5].conjugate(), OD[2]]]
+                 [OD[3].conjugate(), OD[1], OD[5]],
+                 [OD[4].conjugate(), OD[5].conjugate(), OD[2]]]
             for r, c in data_pairs:
                 if r != c:
                     val = sum(X[r][i] * Y[i][c] + Y[r][i] * X[i][c] for i in range(3)) * self._half
@@ -1283,7 +1269,7 @@ class ExceptionalJordanAlgebra(JordanAlgebra):
                     tester.assertEqual(val.imag_part(), zerO)
 
     @cached_method
-    def basis(self):
+    def basis(self) -> Family:
         r"""
         Return a basis of ``self``.
 
@@ -1328,7 +1314,7 @@ class ExceptionalJordanAlgebra(JordanAlgebra):
 
     algebra_generators = basis
 
-    def gens(self) -> tuple:
+    def gens(self) -> Family:
         """
         Return the generators of ``self``.
 
@@ -1350,7 +1336,7 @@ class ExceptionalJordanAlgebra(JordanAlgebra):
             [ 0  0  k]
             [ 0 -k  0]
         """
-        return tuple(self.algebra_generators())
+        return self.basis()
 
     @cached_method
     def zero(self):
@@ -1697,8 +1683,8 @@ class ExceptionalJordanAlgebra(JordanAlgebra):
                  [SD[3].conjugate(), SD[1], SD[5]],
                  [SD[4].conjugate(), SD[5].conjugate(), SD[2]]]
             Y = [[OD[0], OD[3], OD[4]],
-                  [OD[3].conjugate(), OD[1], OD[5]],
-                  [OD[4].conjugate(), OD[5].conjugate(), OD[2]]]
+                 [OD[3].conjugate(), OD[1], OD[5]],
+                 [OD[4].conjugate(), OD[5].conjugate(), OD[2]]]
             # we do a simplified multiplication for the diagonal entries since
             # we have, e.g., \alpha * \alpha' + (x (x')^* + x' x^* + y (y')^* + y' y^*) / 2
             ret = [X[0][0] * Y[0][0] + (X[0][1] * Y[1][0]).real_part() + (X[0][2] * Y[2][0]).real_part(),

@@ -428,7 +428,7 @@ class QuantumValuedPolynomialRing(UniqueRepresentation, Parent):
                 return self.basis()[1]
 
             @cached_method
-            def algebra_generators(self):
+            def algebra_generators(self) -> Family:
                 r"""
                 Return the generators of this algebra.
 

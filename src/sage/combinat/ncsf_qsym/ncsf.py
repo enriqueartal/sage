@@ -39,9 +39,10 @@ from sage.combinat.ncsf_qsym.combinatorics import (coeff_pi, coeff_lp,
         coeff_sp, coeff_ell, m_to_s_stat, number_of_fCT, number_of_SSRCT, compositions_order)
 from sage.combinat.partition import Partition
 from sage.combinat.permutation import Permutations
+from sage.combinat.sf.sf import SymmetricFunctions
 from sage.matrix.constructor import matrix
 from sage.matrix.matrix_space import MatrixSpace
-from sage.combinat.sf.sf import SymmetricFunctions
+from sage.sets.family import Family
 
 
 class NonCommutativeSymmetricFunctions(UniqueRepresentation, Parent):
@@ -2031,7 +2032,7 @@ class NonCommutativeSymmetricFunctions(UniqueRepresentation, Parent):
         class ParentMethods:
 
             @cached_method
-            def algebra_generators(self):
+            def algebra_generators(self) -> Family:
                 """
                 Return the algebra generators of a given multiplicative basis of
                 non-commutative symmetric functions.
@@ -2047,9 +2048,9 @@ class NonCommutativeSymmetricFunctions(UniqueRepresentation, Parent):
                     sage: f[1], f[2], f[3]
                     (Psi[1], Psi[2], Psi[3])
                 """
-                from sage.sets.family import Family
                 from sage.sets.positive_integers import PositiveIntegers
-                return Family(PositiveIntegers(), lambda i: self.monomial(self._indices([i])))
+                return Family(PositiveIntegers(),
+                              lambda i: self.monomial(self._indices([i])))
 
             def product_on_basis(self, composition1, composition2):
                 """

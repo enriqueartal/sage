@@ -944,7 +944,7 @@ class Multizetas(CombinatorialFreeModule):
             return x.composition()
         raise TypeError('invalid input for building a multizeta value')
 
-    def algebra_generators(self, n) -> list:
+    def algebra_generators(self, n) -> tuple:
         """
         Return a set of multiplicative generators in weight ``n``.
 
@@ -958,12 +958,12 @@ class Multizetas(CombinatorialFreeModule):
 
             sage: M = Multizetas(QQ)
             sage: M.algebra_generators(5)
-            [ζ(5)]
+            (ζ(5),)
             sage: M.algebra_generators(8)
-            [ζ(3,5)]
+            (ζ(3,5),)
         """
         W = self.basis().keys()
-        return [self._monomial(W(b, check=False)) for b in B_data[n]]
+        return tuple(self._monomial(W(b, check=False)) for b in B_data[n])
 
     def basis_data(self, basering, n) -> Iterator:
         """
