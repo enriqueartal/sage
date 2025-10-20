@@ -35,10 +35,12 @@ cdef class ConstantFunction(SageObject):
     this is not (currently) picklable::
 
         sage: g = lambda x: 3
-        sage: g == loads(dumps(g))
-        Traceback (most recent call last):
-        ...
-        PicklingError: Can't pickle ...: attribute lookup ... failed
+        sage: from _pickle import PicklingError
+        sage: try:
+        ....:     g == loads(dumps(g))
+        ....: except PicklingError:
+        ....:     True
+        True
         sage: f == loads(dumps(f))
         True
 

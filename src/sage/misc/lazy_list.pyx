@@ -537,13 +537,11 @@ cdef class lazy_list_generic():
             sage: from itertools import count
             sage: from sage.misc.lazy_list import lazy_list
             sage: m = lazy_list(count())
-            sage: x = loads(dumps(m))
-            sage: y = iter(x)
-            sage: print("{} {} {}".format(next(y), next(y), next(y)))
-            0 1 2
-            sage: m2 = m[3::2]
-            sage: loads(dumps(m2))
-            lazy list [3, 5, 7, ...]
+            sage: try:
+            ....:     x = loads(dumps(m))
+            ....: except TypeError as e:
+            ....:     "pickle" in str(e) and "count" in str(e)
+            True
         """
         if self.master is None:
             raise NotImplementedError
@@ -916,8 +914,11 @@ cdef class lazy_list_from_iterator(lazy_list_generic):
         [0, 1, 2]
         sage: [next(x), next(y)]
         [3, 3]
-        sage: loads(dumps(m))
-        lazy list [0, 1, 2, ...]
+        sage: try:
+        ....:     loads(dumps(m))
+        ....: except TypeError as e:
+        ....:     "pickle" in str(e) and "count" in str(e)
+        True
     """
 
     def __init__(self, iterator, cache=None, stop=None):
@@ -987,10 +988,11 @@ cdef class lazy_list_from_iterator(lazy_list_generic):
 
             sage: from sage.misc.lazy_list import lazy_list_from_iterator
             sage: from itertools import count
-            sage: loads(dumps(lazy_list_from_iterator(count())))
-            lazy list [0, 1, 2, ...]
-            sage: loads(dumps(lazy_list_from_iterator(count(), ['a'])))
-            lazy list ['a', 0, 1, ...]
+            sage: try:
+            ....:     loads(dumps(lazy_list_from_iterator(count())))
+            ....: except TypeError as e:
+            ....:     "pickle" in str(e) and "count" in str(e)
+            True
         """
         return lazy_list_from_iterator, (self.iterator, self.cache, self.stop)
 
