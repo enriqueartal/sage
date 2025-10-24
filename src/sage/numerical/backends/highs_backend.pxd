@@ -15,7 +15,12 @@ cdef class HiGHSBackend(GenericBackend):
     cdef str prob_name
     cdef dict col_name_var
     cdef dict row_name_var
+    cdef dict row_data_cache
     cdef int numcols
     cdef int numrows
-    cdef double obj_constant_term
     cpdef __copy__(self)
+    cpdef get_row_prim(self, int i)
+    cpdef int get_row_stat(self, int i) except? -1
+    cpdef int get_col_stat(self, int j) except? -1
+    cpdef set_row_stat(self, int i, int stat)
+    cpdef set_col_stat(self, int j, int stat)
