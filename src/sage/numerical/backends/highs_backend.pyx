@@ -1,12 +1,12 @@
-# sage.doctest: optional - highspy
+# sage.doctest: optional - highs
 """
 HiGHS Backend
 
 AUTHORS:
 
-- SageMath Developers (2025): initial implementation
+- Chenxin Zhong (chenxin.zhong@outlook.com): initial implementation
 
-This backend uses the HiGHS optimization solver, which supports Linear Programming (LP),
+This backend uses the HiGHS optimization solver C API, which supports Linear Programming (LP),
 Quadratic Programming (QP), and Mixed Integer Programming (MIP).
 
 HiGHS is available under the MIT License.
@@ -24,13 +24,159 @@ HiGHS is available under the MIT License.
 
 from sage.numerical.mip import MIPSolverException
 from copy import copy
+from cysignals.signals cimport sig_on, sig_off
+
+# C standard library for memory allocation
+cdef extern from "stdlib.h":
+    void* malloc(size_t size) nogil
+    void free(void* ptr) nogil
+
+# Declare HiGHS C API - all functions are declared with nogil for use with sig_on/sig_off
+cdef extern from "highs/interfaces/highs_c_api.h":
+    ctypedef int HighsInt
+    
+    # Constants from C API
+    const HighsInt kHighsStatusError
+    const HighsInt kHighsStatusOk
+    const HighsInt kHighsStatusWarning
+    
+    const HighsInt kHighsVarTypeContinuous
+    const HighsInt kHighsVarTypeInteger
+    const HighsInt kHighsVarTypeSemiContinuous
+    const HighsInt kHighsVarTypeSemiInteger
+    
+    const HighsInt kHighsObjSenseMinimize
+    const HighsInt kHighsObjSenseMaximize
+    
+    const HighsInt kHighsModelStatusNotset
+    const HighsInt kHighsModelStatusLoadError
+    const HighsInt kHighsModelStatusModelError
+    const HighsInt kHighsModelStatusOptimal
+    const HighsInt kHighsModelStatusInfeasible
+    const HighsInt kHighsModelStatusUnboundedOrInfeasible
+    const HighsInt kHighsModelStatusUnbounded
+    const HighsInt kHighsModelStatusTimeLimit
+    const HighsInt kHighsModelStatusIterationLimit
+    const HighsInt kHighsModelStatusInterrupt
+    const HighsInt kHighsModelStatusMemoryLimit
+    
+    const HighsInt kHighsBasisStatusLower
+    const HighsInt kHighsBasisStatusBasic
+    const HighsInt kHighsBasisStatusUpper
+    const HighsInt kHighsBasisStatusZero
+    const HighsInt kHighsBasisStatusNonbasic
+    
+    # Core functions
+    void* Highs_create() nogil
+    void Highs_destroy(void* highs) nogil
+    HighsInt Highs_run(void* highs) nogil
+    
+    # Model building
+    HighsInt Highs_addCol(void* highs, double cost, double lower, double upper,
+                          HighsInt num_nz, const HighsInt* index, const double* value) nogil
+    HighsInt Highs_addRow(void* highs, double lower, double upper,
+                          HighsInt num_nz, const HighsInt* index, const double* value) nogil
+    HighsInt Highs_addCols(void* highs, HighsInt num_new_col, const double* costs,
+                           const double* lower, const double* upper, HighsInt num_new_nz,
+                           const HighsInt* starts, const HighsInt* indices, const double* values) nogil
+    HighsInt Highs_addRows(void* highs, HighsInt num_new_row, const double* lower,
+                           const double* upper, HighsInt num_new_nz, const HighsInt* starts,
+                           const HighsInt* indices, const double* values) nogil
+    
+    # Objective
+    HighsInt Highs_changeObjectiveSense(void* highs, HighsInt sense) nogil
+    HighsInt Highs_changeColCost(void* highs, HighsInt col, double cost) nogil
+    HighsInt Highs_changeObjectiveOffset(void* highs, double offset) nogil
+    
+    # Bounds
+    HighsInt Highs_changeColBounds(void* highs, HighsInt col, double lower, double upper) nogil
+    HighsInt Highs_changeRowBounds(void* highs, HighsInt row, double lower, double upper) nogil
+    
+    # Integrality
+    HighsInt Highs_changeColIntegrality(void* highs, HighsInt col, HighsInt integrality) nogil
+    HighsInt Highs_getColIntegrality(const void* highs, HighsInt col, HighsInt* integrality) nogil
+    
+    # Solution queries
+    HighsInt Highs_getSolution(void* highs, double* col_value, double* col_dual,
+                               double* row_value, double* row_dual) nogil
+    HighsInt Highs_getBasis(void* highs, HighsInt* col_status, HighsInt* row_status) nogil
+    
+    # Info queries
+    HighsInt Highs_getModelStatus(const void* highs) nogil
+    HighsInt Highs_getNumCol(const void* highs) nogil
+    HighsInt Highs_getNumRow(const void* highs) nogil
+    HighsInt Highs_getNumNz(const void* highs) nogil
+    double Highs_getInfinity(const void* highs) nogil
+    double Highs_getObjectiveValue(const void* highs) nogil
+    HighsInt Highs_getDoubleInfoValue(const void* highs, const char* info, double* value) nogil
+    HighsInt Highs_getIntInfoValue(const void* highs, const char* info, HighsInt* value) nogil
+    HighsInt Highs_getObjectiveSense(const void* highs, HighsInt* sense) nogil
+    HighsInt Highs_getObjectiveOffset(const void* highs, double* offset) nogil
+    
+    # Get columns/rows data
+    HighsInt Highs_getColsByRange(const void* highs, HighsInt from_col, HighsInt to_col,
+                                   HighsInt* num_col, double* costs, double* lower, double* upper,
+                                   HighsInt* num_nz, HighsInt* matrix_start, HighsInt* matrix_index,
+                                   double* matrix_value) nogil
+    
+    # Name functions
+    HighsInt Highs_passColName(void* highs, HighsInt col, const char* name) nogil
+    HighsInt Highs_passRowName(void* highs, HighsInt row, const char* name) nogil
+    
+    # Options
+    HighsInt Highs_setBoolOptionValue(void* highs, const char* option, HighsInt value) nogil
+    HighsInt Highs_setIntOptionValue(void* highs, const char* option, HighsInt value) nogil
+    HighsInt Highs_setDoubleOptionValue(void* highs, const char* option, double value) nogil
+    HighsInt Highs_setStringOptionValue(void* highs, const char* option, const char* value) nogil
+    HighsInt Highs_getBoolOptionValue(const void* highs, const char* option, HighsInt* value) nogil
+    HighsInt Highs_getIntOptionValue(const void* highs, const char* option, HighsInt* value) nogil
+    HighsInt Highs_getDoubleOptionValue(const void* highs, const char* option, double* value) nogil
+    HighsInt Highs_getStringOptionValue(const void* highs, const char* option, char* value) nogil
+    
+    # Write model
+    HighsInt Highs_writeModel(void* highs, const char* filename) nogil
+    HighsInt Highs_readModel(void* highs, const char* filename) nogil
+    
+    # Basis functions
+    HighsInt Highs_setBasic(void* highs, HighsInt* col_status, HighsInt* row_status) nogil
+    HighsInt Highs_setBasis(void* highs, const HighsInt* col_status, const HighsInt* row_status) nogil
+    
+    # Delete functions
+    HighsInt Highs_deleteRowsByRange(void* highs, HighsInt from_row, HighsInt to_row) nogil
+    HighsInt Highs_deleteColsByRange(void* highs, HighsInt from_col, HighsInt to_col) nogil
+    HighsInt Highs_deleteRowsBySet(void* highs, HighsInt num_set_entries, const HighsInt* set) nogil
+    HighsInt Highs_deleteColsBySet(void* highs, HighsInt num_set_entries, const HighsInt* set) nogil
+    
+    # Change coefficient
+    HighsInt Highs_changeCoeff(void* highs, HighsInt row, HighsInt col, double value) nogil
+    
+    # Model data access
+    HighsInt Highs_getRowsByRange(const void* highs, HighsInt from_row, HighsInt to_row,
+                                  HighsInt* num_row, double* lower, double* upper, HighsInt* num_nz,
+                                  HighsInt* matrix_start, HighsInt* matrix_index, double* matrix_value) nogil
+    
+    # Model data access
+    HighsInt Highs_getColsByRange(const void* highs, HighsInt from_col, HighsInt to_col,
+                                  HighsInt* num_col, double* costs, double* lower, double* upper,
+                                  HighsInt* num_nz, HighsInt* matrix_start, HighsInt* matrix_index,
+                                  double* matrix_value) nogil
+    
+    # Names (these are not nogil since they deal with strings)
+    HighsInt Highs_getColName(const void* highs, HighsInt col, char* name)
+    HighsInt Highs_getRowName(const void* highs, HighsInt row, char* name)
+    
+    # Column/row deletion
+    HighsInt Highs_deleteColsByRange(void* highs, HighsInt from_col, HighsInt to_col) nogil
+    HighsInt Highs_deleteRowsByRange(void* highs, HighsInt from_row, HighsInt to_row) nogil
 
 
 cdef class HiGHSBackend(GenericBackend):
     """
-    MIP Backend that uses the HiGHS solver.
+    MIP Backend that uses the HiGHS solver via C API.
 
     HiGHS is a high-performance solver for large-scale LP, QP, and MIP.
+    This implementation uses the HiGHS C API directly for optimal performance
+    and proper interrupt handling with sig_on/sig_off.
     """
 
     def __cinit__(self, maximization=True):
@@ -41,14 +187,12 @@ cdef class HiGHSBackend(GenericBackend):
 
             sage: p = MixedIntegerLinearProgram(solver='HiGHS')
         """
-        try:
-            import highspy
-        except ImportError:
-            raise ImportError("HiGHS is not available. Please install the 'highspy' package.")
+        # Create HiGHS instance
+        self.highs = Highs_create()
+        if self.highs == NULL:
+            raise MemoryError("Failed to create HiGHS instance")
         
-        self.highs_model = highspy.Highs()
-        # Suppress HiGHS output messages
-        self.highs_model.setOptionValue("log_to_console", False)
+        # Initialize metadata
         self.prob_name = ""
         self.col_name_var = {}
         self.row_name_var = {}
@@ -57,10 +201,52 @@ cdef class HiGHSBackend(GenericBackend):
         self.numrows = 0
         self.obj_constant_term = 0.0
         
+        # Suppress HiGHS output messages
+        Highs_setBoolOptionValue(self.highs, b"log_to_console", 0)
+        
+        # Set optimization sense
         if maximization:
             self.set_sense(+1)
         else:
             self.set_sense(-1)
+    
+    def __dealloc__(self):
+        """
+        Destructor - free HiGHS instance.
+        """
+        if self.highs != NULL:
+            Highs_destroy(self.highs)
+            self.highs = NULL
+    
+    cdef void _get_col_bounds(self, int col, double* lb, double* ub) except *:
+        """
+        Helper method to get column bounds using Highs_getColsByRange.
+        """
+        cdef HighsInt num_col, num_nz, status
+        
+        sig_on()
+        status = Highs_getColsByRange(self.highs, col, col, 
+                                     &num_col, NULL, lb, ub,
+                                     &num_nz, NULL, NULL, NULL)
+        sig_off()
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to get column bounds")
+    
+    cdef void _get_row_bounds(self, int row, double* lb, double* ub) except *:
+        """
+        Helper method to get row bounds using Highs_getRowsByRange.
+        """
+        cdef HighsInt num_row, num_nz, status
+        
+        sig_on()
+        status = Highs_getRowsByRange(self.highs, row, row, 
+                                     &num_row, lb, ub,
+                                     &num_nz, NULL, NULL, NULL)
+        sig_off()
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to get row bounds")
     
     cpdef int add_variable(self, lower_bound=0.0, upper_bound=None, binary=False, 
                           continuous=False, integer=False, obj=0.0, name=None) except -1:
@@ -101,7 +287,7 @@ cdef class HiGHSBackend(GenericBackend):
             1
             sage: p.add_variable(binary=True)     
             1
-            sage: p.add_variable(lower_bound=-2.0, integer=True)
+            sage: p.add_variable(lower_bound=-2.0, integer=True)  
             2
             sage: p.add_variable(continuous=True, integer=True) 
             Traceback (most recent call last):
@@ -114,50 +300,374 @@ cdef class HiGHSBackend(GenericBackend):
             sage: p.objective_coefficient(3)       
             1.0
         """
-        cdef int vtype = int(bool(binary)) + int(bool(continuous)) + int(bool(integer))
-        if vtype == 0:
-            continuous = True
-        elif vtype != 1:
-            raise ValueError("Exactly one parameter of 'binary', 'integer' and 'continuous' must be 'True'.")
+        cdef HighsInt var_type
+        cdef double lb, ub
+        cdef HighsInt status
+        cdef HighsInt col_idx
         
         # Determine variable type
-        import highspy
-        
-        if binary:
-            var_type = highspy.HighsVarType.kInteger
-            if lower_bound is None or lower_bound < 0:
-                lower_bound = 0.0
-            if upper_bound is None or upper_bound > 1:
-                upper_bound = 1.0
+        if integer and continuous:
+            raise ValueError("Variable cannot be both continuous and integer")
+        elif integer and binary:
+            raise ValueError("Variable cannot be both binary and integer")
+        elif continuous and binary:
+            raise ValueError("Variable cannot be both binary and continuous")
+        elif continuous and integer and binary:
+            raise ValueError("Variable cannot be binary, continuous, and integer simultaneously")
+        elif binary:
+            var_type = kHighsVarTypeInteger
+            lb = 0.0
+            ub = 1.0
         elif integer:
-            var_type = highspy.HighsVarType.kInteger
+            var_type = kHighsVarTypeInteger
         else:
-            var_type = highspy.HighsVarType.kContinuous
+            var_type = kHighsVarTypeContinuous
         
-        # Handle bounds
+        # Set bounds
         if lower_bound is None:
-            lower_bound = -highspy.kHighsInf
+            if binary:
+                lb = 0.0
+            else:
+                lb = -Highs_getInfinity(self.highs)
+        else:
+            lb = float(lower_bound)
+        
         if upper_bound is None:
-            upper_bound = highspy.kHighsInf
+            if binary:
+                ub = 1.0
+            else:
+                ub = Highs_getInfinity(self.highs)
+        else:
+            ub = float(upper_bound)
         
-        # Add column to model
+        # Add column with empty constraint coefficients
+        sig_on()
+        status = Highs_addCol(self.highs, float(obj), lb, ub, 0, NULL, NULL)
+        sig_off()
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to add variable")
+        
         col_idx = self.numcols
-        self.highs_model.addVar(float(lower_bound), float(upper_bound))
+        self.numcols += 1
         
-        # Set objective coefficient
-        if obj is not None and obj != 0.0:
-            self.highs_model.changeColCost(col_idx, float(obj))
-        
-        # Set variable type
-        if var_type == highspy.HighsVarType.kInteger:
-            self.highs_model.changeColIntegrality(col_idx, highspy.HighsVarType.kInteger)
+        # Set integrality if needed
+        if var_type == kHighsVarTypeInteger:
+            sig_on()
+            status = Highs_changeColIntegrality(self.highs, col_idx, kHighsVarTypeInteger)
+            sig_off()
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to set variable integrality")
         
         # Set name if provided
         if name is not None:
-            self.col_name_var[col_idx] = name
+            name_bytes = str(name).encode('utf-8')
+            Highs_passColName(self.highs, col_idx, name_bytes)
+            self.col_name_var[col_idx] = str(name)
         
-        self.numcols += 1
         return col_idx
+    
+    cpdef int add_variable_with_type(self, int vtype, lower_bound=0.0, upper_bound=None, 
+                                     obj=0.0, name=None) except -1:
+        """
+        Add a variable with type specified as an integer.
+
+        This amounts to adding a new column to the matrix. By default,
+        the variable is positive and real, and the coefficient in the
+        objective function is 0.0.
+
+        INPUT:
+
+        - ``vtype`` -- integer specifying the variable type:
+
+            * ``1`` = Integer
+            * ``0`` = Binary
+            * ``-1`` = Real (Continuous)
+
+        - ``lower_bound`` -- the lower bound of the variable (default: 0)
+
+        - ``upper_bound`` -- the upper bound of the variable (default: ``None``)
+
+        - ``obj`` -- (optional) coefficient of this variable in the objective function (default: 0.0)
+
+        - ``name`` -- an optional name for the newly added variable (default: ``None``)
+
+        OUTPUT: the index of the newly created variable
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver = "HiGHS")
+            sage: p.ncols()                       
+            0
+            sage: p.add_variable_with_type(-1)    # Continuous variable
+            0
+            sage: p.is_variable_continuous(0)
+            True
+            sage: p.add_variable_with_type(0)     # Binary variable
+            1
+            sage: p.is_variable_binary(1)
+            True
+            sage: p.add_variable_with_type(1, lower_bound=-2.0)  # Integer variable
+            2
+            sage: p.is_variable_integer(2)
+            True
+            sage: p.add_variable_with_type(1, name='x', obj=1.0)
+            3
+            sage: p.col_name(3)                    
+            'x'
+            sage: p.objective_coefficient(3)       
+            1.0
+
+        TESTS:
+
+        Invalid variable type raises an error::
+
+            sage: p.add_variable_with_type(2)
+            Traceback (most recent call last):
+            ...
+            ValueError: Invalid variable type 2. Must be -1 (continuous), 0 (binary), or 1 (integer)
+        """
+        cdef HighsInt var_type
+        cdef double lb, ub
+        cdef HighsInt status
+        cdef HighsInt col_idx
+        
+        # Validate and determine variable type
+        if vtype == 1:
+            # Integer
+            var_type = kHighsVarTypeInteger
+        elif vtype == 0:
+            # Binary - set type to integer with bounds [0,1]
+            var_type = kHighsVarTypeInteger
+        elif vtype == -1:
+            # Continuous
+            var_type = kHighsVarTypeContinuous
+        else:
+            raise ValueError(f"Invalid variable type {vtype}. Must be -1 (continuous), 0 (binary), or 1 (integer)")
+        
+        # Set bounds
+        if vtype == 0:  # Binary
+            # Binary variables have fixed bounds [0, 1]
+            lb = 0.0
+            ub = 1.0
+            # Override user-provided bounds for binary variables
+        else:
+            # For integer and continuous variables, use provided bounds
+            if lower_bound is None:
+                lb = -Highs_getInfinity(self.highs)
+            else:
+                lb = float(lower_bound)
+            
+            if upper_bound is None:
+                ub = Highs_getInfinity(self.highs)
+            else:
+                ub = float(upper_bound)
+        
+        # Add column with empty constraint coefficients
+        sig_on()
+        status = Highs_addCol(self.highs, float(obj), lb, ub, 0, NULL, NULL)
+        sig_off()
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to add variable")
+        
+        col_idx = self.numcols
+        self.numcols += 1
+        
+        # Set integrality if needed (for integer or binary)
+        if var_type == kHighsVarTypeInteger:
+            sig_on()
+            status = Highs_changeColIntegrality(self.highs, col_idx, kHighsVarTypeInteger)
+            sig_off()
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to set variable integrality")
+        
+        # Set name if provided
+        if name is not None:
+            name_bytes = str(name).encode('utf-8')
+            Highs_passColName(self.highs, col_idx, name_bytes)
+            self.col_name_var[col_idx] = str(name)
+        
+        return col_idx
+    
+
+    cpdef set_sense(self, int sense):
+        """
+        Set the direction (maximization/minimization).
+
+        INPUT:
+
+        - ``sense`` -- +1 for maximization; -1 for minimization
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.is_maximization()
+            True
+            sage: p.set_sense(-1)
+            sage: p.is_maximization()
+            False
+        """
+        cdef HighsInt highs_sense
+        cdef HighsInt status
+        
+        if sense == 1:
+            highs_sense = kHighsObjSenseMaximize
+        else:
+            highs_sense = kHighsObjSenseMinimize
+        
+        sig_on()
+        status = Highs_changeObjectiveSense(self.highs, highs_sense)
+        sig_off()
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to set objective sense")
+    
+    cpdef int solve(self) except -1:
+        """
+        Solve the problem.
+
+        Sage uses HiGHS's implementation of the branch-and-cut
+        algorithm to solve mixed-integer linear programs. HiGHS
+        automatically selects the most appropriate algorithm based
+        on the problem type.
+
+        .. NOTE::
+
+            This method raises ``MIPSolverException`` exceptions when
+            the solution cannot be computed for any reason (none
+            exists, or the solver was not able to find it, etc...)
+
+        EXAMPLES::
+
+            sage: lp = MixedIntegerLinearProgram(solver = 'HiGHS', maximization = False)
+            sage: x, y = lp[0], lp[1]                                                   
+            sage: lp.add_constraint(-2*x + y <= 1)                                      
+            sage: lp.add_constraint(x - y <= 1)                                         
+            sage: lp.add_constraint(x + y >= 2)                                         
+            sage: lp.set_objective(x + y)                                               
+            sage: lp.set_integer(x)                                                     
+            sage: lp.set_integer(y)                                                     
+            sage: lp.solve()                                                            
+            2.0
+            sage: lp.get_values([x, y])                                                 
+            [1.0, 1.0]
+
+        TESTS::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver = "HiGHS")
+            sage: p.add_variables(2)              
+            1
+            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
+            sage: p.set_objective([1, 1])         
+            sage: p.solve()                       
+            0
+            sage: p.objective_coefficient(0,1)    
+            sage: p.solve()                       
+            0
+        """
+        cdef HighsInt status
+        cdef HighsInt model_status
+        
+        # Pure C API call between sig_on/sig_off - no Python objects touched!
+        sig_on()
+        status = Highs_run(self.highs)
+        sig_off()
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Solver run failed")
+        
+        # Check model status
+        model_status = Highs_getModelStatus(self.highs)
+        
+        if model_status == kHighsModelStatusOptimal:
+            return 0  # Success
+        elif model_status == kHighsModelStatusInfeasible:
+            raise MIPSolverException("HiGHS: Problem is infeasible")
+        elif model_status == kHighsModelStatusUnbounded:
+            raise MIPSolverException("HiGHS: Problem is unbounded")
+        elif model_status == kHighsModelStatusTimeLimit:
+            raise MIPSolverException("HiGHS: Time limit reached")
+        elif model_status == kHighsModelStatusIterationLimit:
+            raise MIPSolverException("HiGHS: Iteration limit reached")
+        elif model_status == kHighsModelStatusInterrupt:
+            raise MIPSolverException("HiGHS: Interrupted by user")
+        else:
+            raise MIPSolverException(f"HiGHS: Solver failed with status {model_status}")
+    
+    cpdef get_objective_value(self):
+        """
+        Return the value of the objective function.
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.add_variables(2)            
+            1
+            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
+            sage: p.set_objective([1, 1])       
+            sage: p.solve()                     
+            0
+            sage: p.get_objective_value()       
+            2.0
+        """
+        cdef double obj_value
+        
+        obj_value = Highs_getObjectiveValue(self.highs)
+        # HiGHS already includes the offset, so don't add it again
+        return obj_value
+    
+    cpdef get_variable_value(self, int variable):
+        """
+        Return the value of a variable given by the solver.
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.add_variables(2)
+            1
+            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
+            sage: p.set_objective([1, 1])
+            sage: p.solve()
+            0
+            sage: p.get_variable_value(0)
+            2.0
+            sage: p.get_variable_value(1)
+            0.0
+        """
+        cdef double* col_value
+        cdef HighsInt num_cols
+        cdef HighsInt status
+        cdef double result
+        
+        num_cols = Highs_getNumCol(self.highs)
+        
+        if variable < 0 or variable >= num_cols:
+            raise ValueError(f"Variable index {variable} out of range [0, {num_cols})")
+        
+        # Allocate array for solution
+        col_value = <double*> malloc(num_cols * sizeof(double))
+        if col_value == NULL:
+            raise MemoryError("Failed to allocate memory for solution")
+        
+        try:
+            sig_on()
+            status = Highs_getSolution(self.highs, col_value, NULL, NULL, NULL)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to get solution")
+            
+            result = col_value[variable]
+        finally:
+            free(col_value)
+        
+        return result
     
     cpdef int add_variables(self, int number, lower_bound=0.0, upper_bound=None,
                            binary=False, continuous=False, integer=False, obj=0.0, 
@@ -216,7 +726,6 @@ cdef class HiGHSBackend(GenericBackend):
             42.0
         """
         cdef int i
-        cdef int start_idx = self.numcols
         
         for i in range(number):
             name = None
@@ -228,61 +737,87 @@ cdef class HiGHSBackend(GenericBackend):
         
         return self.numcols - 1
     
-    cpdef set_sense(self, int sense):
-        """
-        Set the direction (maximization/minimization).
-
-        INPUT:
-
-        - ``sense`` -- integer:
-
-            * +1 => Maximization
-            * -1 => Minimization
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver = "HiGHS")
-            sage: p.is_maximization()             
-            True
-            sage: p.set_sense(-1)                 
-            sage: p.is_maximization()             
-            False
-        """
-        import highspy
-        if sense == 1:
-            self.highs_model.changeObjectiveSense(highspy.ObjSense.kMaximize)
-        else:
-            self.highs_model.changeObjectiveSense(highspy.ObjSense.kMinimize)
-    
     cpdef objective_coefficient(self, int variable, coeff=None):
         """
-        Set or get the coefficient of a variable in the objective function.
+        Add ``number`` new variables.
+
+        This amounts to adding new columns to the matrix. By default,
+        the variables are both positive, real and their coefficient in
+        the objective function is 0.0.
 
         INPUT:
 
-        - ``variable`` -- integer; the variable's id
+        - ``n`` -- the number of new variables (must be > 0)
 
-        - ``coeff`` -- double; its coefficient or ``None`` for
-          reading (default: ``None``)
+        - ``lower_bound`` -- the lower bound of the variable (default: 0)
+
+        - ``upper_bound`` -- the upper bound of the variable (default: ``None``)
+
+        - ``binary`` -- ``True`` if the variable is binary (default: ``False``)
+
+        - ``continuous`` -- ``True`` if the variable is binary (default: ``True``)
+
+        - ``integer`` -- ``True`` if the variable is binary (default: ``False``)
+
+        - ``obj`` -- coefficient of all variables in the objective function (default: 0.0)
+
+        - ``names`` -- list of names (default: ``None``)
+
+        OUTPUT: the index of the variable created last
 
         EXAMPLES::
 
             sage: from sage.numerical.backends.generic_backend import get_solver
             sage: p = get_solver(solver = "HiGHS")
-            sage: p.add_variable()                
+            sage: p.ncols()                       
             0
-            sage: p.objective_coefficient(0)      
-            0.0
-            sage: p.objective_coefficient(0,2)    
-            sage: p.objective_coefficient(0)      
-            2.0
+            sage: p.add_variables(5)              
+            4
+            sage: p.ncols()                       
+            5
+            sage: p.add_variables(2, lower_bound=-2.0, integer=True, obj=42.0, names=['a','b'])
+            6
+
+        TESTS:
+
+        Check that arguments are used::
+
+            sage: p.col_bounds(5)  # tol 1e-8   
+            (-2.0, None)
+            sage: p.is_variable_integer(5)       
+            True
+            sage: p.col_name(5)                  
+            'a'
+            sage: p.objective_coefficient(5)     
+            42.0
         """
+        cdef HighsInt status
+        cdef double cost
+        cdef HighsInt num_col
+        cdef HighsInt num_nz
+        
+        if variable < 0 or variable >= self.numcols:
+            raise ValueError(f"invalid variable index {variable}")
+        
         if coeff is None:
-            lp = self.highs_model.getLp()
-            return lp.col_cost_[variable]
+            # Get coefficient using Highs_getColsByRange
+            sig_on()
+            status = Highs_getColsByRange(self.highs, variable, variable, 
+                                         &num_col, &cost, NULL, NULL,
+                                         &num_nz, NULL, NULL, NULL)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to get objective coefficient")
+            return cost
         else:
-            self.highs_model.changeColCost(variable, float(coeff))
+            # Set coefficient
+            sig_on()
+            status = Highs_changeColCost(self.highs, variable, float(coeff))
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to set objective coefficient")
     
     cpdef problem_name(self, name=None):
         """
@@ -330,6 +865,11 @@ cdef class HiGHSBackend(GenericBackend):
                 self.objective_coefficient(i, coeff[i])
         
         self.obj_constant_term = d
+        
+        # Set offset in HiGHS
+        sig_on()
+        Highs_changeObjectiveOffset(self.highs, d)
+        sig_off()
     
     cpdef set_verbosity(self, int level):
         """
@@ -343,15 +883,21 @@ cdef class HiGHSBackend(GenericBackend):
 
             sage: from sage.numerical.backends.generic_backend import get_solver
             sage: p = get_solver(solver='HiGHS')
-            sage: p.set_verbosity(0)            
+            sage: p.set_verbosity(0)
         """
-        # HiGHS uses different verbosity levels
-        if int(level) == 0:
-            self.highs_model.setOptionValue("log_to_console", False)
-        elif int(level) == 1:
-            self.highs_model.setOptionValue("log_to_console", True)
+        cdef HighsInt status
+        cdef bint log_to_console
+        
+        if level == 0:
+            log_to_console = False
+        elif level == 1:
+            log_to_console = True
         else:
-            raise ValueError("HiGHS supports verbosity levels 0 and 1 only.")
+            raise ValueError("Invalid verbosity level. Must be 0 or 1.")
+        
+        status = Highs_setBoolOptionValue(self.highs, b"log_to_console", log_to_console)
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to set verbosity")
     
     cpdef add_linear_constraint(self, coefficients, lower_bound, upper_bound, name=None):
         """
@@ -373,39 +919,66 @@ cdef class HiGHSBackend(GenericBackend):
             4
             sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
         """
-        import highspy
+        cdef double lb, ub
+        cdef HighsInt num_nz
+        cdef HighsInt* indices
+        cdef double* values
+        cdef HighsInt status
+        cdef int i
         
+        # Convert bounds
         if lower_bound is None:
-            lower_bound = -highspy.kHighsInf
-        if upper_bound is None:
-            upper_bound = highspy.kHighsInf
-        
-        # Build constraint
-        indices = []
-        values = []
-        for (i, v) in coefficients:
-            if i < 0 or i >= self.ncols():
-                raise ValueError(f"invalid variable index {i}")
-            indices.append(int(i))
-            values.append(float(v))
-        
-        # Add row to model using numpy arrays
-        import numpy as np
-        row_idx = self.numrows
-        num_nz = len(indices)
-        if num_nz > 0:
-            index_array = np.array(indices, dtype=np.int32)
-            value_array = np.array(values, dtype=np.double)
-            self.highs_model.addRow(float(lower_bound), float(upper_bound), num_nz, index_array, value_array)
+            lb = -Highs_getInfinity(self.highs)
         else:
+            lb = float(lower_bound)
+        
+        if upper_bound is None:
+            ub = Highs_getInfinity(self.highs)
+        else:
+            ub = float(upper_bound)
+        
+        # Build coefficient arrays
+        coeff_list = list(coefficients)
+        num_nz = len(coeff_list)
+        
+        if num_nz == 0:
             # Empty constraint
-            self.highs_model.addRow(float(lower_bound), float(upper_bound), 0, 0, 0)
+            sig_on()
+            status = Highs_addRow(self.highs, lb, ub, 0, NULL, NULL)
+            sig_off()
+        else:
+            # Allocate arrays
+            indices = <HighsInt*> malloc(num_nz * sizeof(HighsInt))
+            values = <double*> malloc(num_nz * sizeof(double))
+            
+            if indices == NULL or values == NULL:
+                free(indices)
+                free(values)
+                raise MemoryError("Failed to allocate memory for constraint")
+            
+            try:
+                # Fill arrays
+                for i in range(num_nz):
+                    var_idx, coeff_val = coeff_list[i]
+                    if var_idx < 0 or var_idx >= self.ncols():
+                        raise ValueError(f"invalid variable index {var_idx}")
+                    indices[i] = var_idx
+                    values[i] = float(coeff_val)
+                
+                # Add constraint
+                sig_on()
+                status = Highs_addRow(self.highs, lb, ub, num_nz, indices, values)
+                sig_off()
+            finally:
+                free(indices)
+                free(values)
         
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to add constraint")
+        
+        # Handle name
         if name is not None:
-            self.row_name_var[name] = row_idx
-        
-        # Cache the row data for later retrieval
-        self.row_data_cache[row_idx] = (indices, values)
+            self.row_name_var[name] = self.numrows
         
         self.numrows += 1
     
@@ -434,510 +1007,36 @@ cdef class HiGHSBackend(GenericBackend):
             (None, 2.0)
             sage: p.add_linear_constraints(2, None, 2, names=['foo','bar'])
         """
-        if lower_bound is None and upper_bound is None:
-            raise ValueError("At least one of 'upper_bound' or 'lower_bound' must be set.")
+        cdef int i
+        cdef double lb, ub
+        cdef HighsInt status
+         
+        # Convert bounds
+        if lower_bound is None:
+            lb = -Highs_getInfinity(self.highs)
+        else:
+            lb = float(lower_bound)
         
-        import highspy
-        import numpy as np
+        if upper_bound is None:
+            ub = Highs_getInfinity(self.highs)
+        else:
+            ub = float(upper_bound)
         
-        # Prepare bounds
-        lb = float(lower_bound) if lower_bound is not None else -highspy.kHighsInf
-        ub = float(upper_bound) if upper_bound is not None else highspy.kHighsInf
-        
-        # Add empty constraints with the specified bounds
+        # Add empty constraints
         for i in range(number):
-            # Add empty row (no coefficients)
-            self.highs_model.addRow(lb, ub, 0, 0, 0)
+            sig_on()
+            status = Highs_addRow(self.highs, lb, ub, 0, NULL, NULL)
+            sig_off()
             
-            # Store name if provided
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to add constraint")
+            
             if names is not None and i < len(names):
                 name = names[i]
                 if name is not None:
                     self.row_name_var[name] = self.numrows
             
             self.numrows += 1
-    
-    cpdef remove_constraint(self, int i):
-        r"""
-        Remove a constraint from ``self``.
-
-        INPUT:
-
-        - ``i`` -- index of the constraint to remove
-
-        EXAMPLES::
-
-            sage: p = MixedIntegerLinearProgram(solver='HiGHS')
-            sage: x, y = p['x'], p['y']
-            sage: p.add_constraint(2*x + 3*y <= 6)
-            sage: p.add_constraint(3*x + 2*y <= 6)
-            sage: p.add_constraint(x >= 0)
-            sage: p.set_objective(x + y + 7)
-            sage: p.set_integer(x); p.set_integer(y)
-            sage: p.solve()
-            9.0
-            sage: p.remove_constraint(0)
-            sage: p.solve()
-            10.0
-
-        Removing fancy constraints does not make Sage crash::
-
-            sage: MixedIntegerLinearProgram(solver = "HiGHS").remove_constraint(-2)
-            Traceback (most recent call last):
-            ...
-            ValueError: The constraint's index i must satisfy 0 <= i < number_of_constraints
-        """
-        if i < 0 or i >= self.nrows():
-            raise ValueError("The constraint's index i must satisfy 0 <= i < number_of_constraints")
-
-        import numpy as np
-        # HiGHS deleteRows expects num_rows and an array of row indices
-        rows_to_delete = np.array([i], dtype=np.int32)
-        self.highs_model.deleteRows(1, rows_to_delete)
-        
-        # Update the number of rows
-        self.numrows -= 1
-        
-        # Update the row_data_cache: shift all rows after i down by one
-        new_cache = {}
-        for row_idx, data in self.row_data_cache.items():
-            if row_idx < i:
-                new_cache[row_idx] = data
-            elif row_idx > i:
-                new_cache[row_idx - 1] = data
-            # row_idx == i is removed, don't add to new_cache
-        self.row_data_cache = new_cache
-        
-        # Update the row_name_var mapping
-        names_to_update = {}
-        names_to_remove = []
-        for name, row_idx in self.row_name_var.items():
-            if row_idx < i:
-                names_to_update[name] = row_idx
-            elif row_idx > i:
-                names_to_update[name] = row_idx - 1
-            else:  # row_idx == i
-                names_to_remove.append(name)
-        
-        for name in names_to_remove:
-            del self.row_name_var[name]
-        self.row_name_var.update(names_to_update)
-
-    cpdef remove_constraints(self, constraints):
-        r"""
-        Remove several constraints.
-
-        INPUT:
-
-        - ``constraints`` -- an iterable containing the indices of the rows to remove
-
-        EXAMPLES::
-
-            sage: p = MixedIntegerLinearProgram(solver='HiGHS')
-            sage: x, y = p['x'], p['y']
-            sage: p.add_constraint(2*x + 3*y <= 6)
-            sage: p.add_constraint(3*x + 2*y <= 6)
-            sage: p.add_constraint(x >= 0)
-            sage: p.set_objective(x + y + 7)
-            sage: p.set_integer(x); p.set_integer(y)
-            sage: p.solve()
-            9.0
-            sage: p.remove_constraints([0])
-            sage: p.solve()
-            10.0
-            sage: p.get_values([x,y])
-            [-0.0, 3.0]
-
-        TESTS:
-
-        Removing fancy constraints does not make Sage crash::
-
-            sage: MixedIntegerLinearProgram(solver="HiGHS").remove_constraints([0, -2])
-            Traceback (most recent call last):
-            ...
-            ValueError: The constraint's index i must satisfy 0 <= i < number_of_constraints
-        """
-        if isinstance(constraints, int):
-            self.remove_constraint(constraints)
-            return
-
-        cdef int last = self.nrows() + 1
-
-        for c in sorted(constraints, reverse=True):
-            if c != last:
-                self.remove_constraint(c)
-                last = c
-    
-    cpdef int solve(self) except -1:
-        """
-        Solve the problem.
-
-        Sage uses HiGHS's implementation of the branch-and-cut
-        algorithm to solve mixed-integer linear programs. HiGHS
-        automatically selects the most appropriate algorithm based
-        on the problem type.
-
-        .. NOTE::
-
-            This method raises ``MIPSolverException`` exceptions when
-            the solution cannot be computed for any reason (none
-            exists, or the solver was not able to find it, etc...)
-
-        EXAMPLES::
-
-            sage: lp = MixedIntegerLinearProgram(solver = 'HiGHS', maximization = False)
-            sage: x, y = lp[0], lp[1]                                                   
-            sage: lp.add_constraint(-2*x + y <= 1)                                      
-            sage: lp.add_constraint(x - y <= 1)                                         
-            sage: lp.add_constraint(x + y >= 2)                                         
-            sage: lp.set_objective(x + y)                                               
-            sage: lp.set_integer(x)                                                     
-            sage: lp.set_integer(y)                                                     
-            sage: lp.solve()                                                            
-            2.0
-            sage: lp.get_values([x, y])                                                 
-            [1.0, 1.0]
-
-        TESTS::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver = "HiGHS")
-            sage: p.add_variables(2)              
-            1
-            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
-            sage: p.set_objective([1, 1])         
-            sage: p.solve()                       
-            0
-            sage: p.objective_coefficient(0,1)    
-            sage: p.solve()                       
-            0
-        """
-        import highspy
-        
-        status = self.highs_model.run()
-        
-        # Check if solution was successful
-        model_status = self.highs_model.getModelStatus()
-        
-        if model_status == highspy.HighsModelStatus.kOptimal:
-            return 0  # Success
-        elif model_status == highspy.HighsModelStatus.kInfeasible:
-            raise MIPSolverException("HiGHS: Problem is infeasible")
-        elif model_status == highspy.HighsModelStatus.kUnbounded:
-            raise MIPSolverException("HiGHS: Problem is unbounded")
-        else:
-            raise MIPSolverException(f"HiGHS: Solver failed with status {model_status}")
-    
-    cpdef get_objective_value(self):
-        """
-        Return the value of the objective function.
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.add_variables(2)            
-            1
-            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
-            sage: p.set_objective([1, 1])       
-            sage: p.solve()                     
-            0
-            sage: p.get_objective_value()       
-            2.0
-        """
-        info = self.highs_model.getInfo()
-        return info.objective_function_value + self.obj_constant_term
-    
-    cpdef get_variable_value(self, int variable):
-        """
-        Return the value of a variable in the current solution.
-
-        INPUT:
-
-        - ``variable`` -- the variable's id
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.add_variables(2)            
-            1
-            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
-            sage: p.set_objective([1, 1])       
-            sage: p.solve()                     
-            0
-            sage: p.get_variable_value(0)       
-            2.0
-            sage: p.get_variable_value(1)       
-            0.0
-        """
-        solution = self.highs_model.getSolution()
-        return solution.col_value[variable]
-    
-    cpdef best_known_objective_bound(self):
-        """
-        Return the value of the currently best known bound.
-
-        This method returns the current best upper (resp. lower) bound on the
-        optimal value of the objective function in a maximization
-        (resp. minimization) problem. It is equal to the output of
-        :meth:`get_objective_value` if the MILP found an optimal solution, but
-        it can differ if it was interrupted manually or after a time limit (cf
-        :meth:`solver_parameter`).
-
-        .. NOTE::
-
-           Has no meaning unless ``solve`` has been called before.
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.add_variables(2)
-            1
-            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
-            sage: p.set_objective([1, 1])
-            sage: p.solve()
-            0
-            sage: p.best_known_objective_bound()
-            2.0
-
-        TESTS::
-            sage: # needs sage.graphs
-            sage: g = graphs.CubeGraph(9)
-            sage: p = MixedIntegerLinearProgram(solver='HiGHS')
-            sage: p.solver_parameter("mip_rel_gap",100)
-            sage: b = p.new_variable(binary=True)
-            sage: p.set_objective(p.sum(b[v] for v in g))
-            sage: for v in g:
-            ....:     p.add_constraint(b[v]+p.sum(b[u] for u in g.neighbors(v)) <= 1)
-            sage: p.add_constraint(b[v] == 1) # Force an easy non-0 solution
-            sage: p.solve() # rel tol 100
-            2.0
-            sage: backend = p.get_backend()
-            sage: backend.best_known_objective_bound()
-            48.0
-        """
-        import highspy
-        info = self.highs_model.getInfo()
-        lp = self.highs_model.getLp()
-        
-        # Check if this is a MIP (has integer variables)
-        has_integer_vars = False
-        if hasattr(lp, 'integrality_') and len(lp.integrality_) > 0:
-            for var_type in lp.integrality_:
-                if var_type == highspy.HighsVarType.kInteger:
-                    has_integer_vars = True
-                    break
-        
-        if has_integer_vars:
-            # For MIP problems, use mip_dual_bound
-            return info.mip_dual_bound + self.obj_constant_term
-        else:
-            # For LP problems, the bound equals the objective value at optimum
-            return info.objective_function_value + self.obj_constant_term
-    
-    cpdef get_relative_objective_gap(self):
-        r"""
-        Return the relative objective gap of the best known solution.
-
-        For a minimization problem, this value is computed by
-        `(\texttt{bestinteger} - \texttt{bestobjective}) / (1e-10 +
-        |\texttt{bestobjective}|)`, where ``bestinteger`` is the value returned
-        by :meth:`get_objective_value` and ``bestobjective`` is the value
-        returned by :meth:`best_known_objective_bound`. For a maximization
-        problem, the value is computed by `(\texttt{bestobjective} -
-        \texttt{bestinteger}) / (1e-10 + |\texttt:bestobjective}|)`.
-
-        .. NOTE::
-
-           Has no meaning unless ``solve`` has been called before.
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.add_variables(2)
-            1
-            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
-            sage: p.set_objective([1, 1])
-            sage: p.solve()
-            0
-            sage: p.get_relative_objective_gap()
-            0.0
-        """
-        import highspy
-        info = self.highs_model.getInfo()
-        lp = self.highs_model.getLp()
-        
-        # Check if this is a MIP (has integer variables)
-        has_integer_vars = False
-        if hasattr(lp, 'integrality_') and len(lp.integrality_) > 0:
-            for var_type in lp.integrality_:
-                if var_type == highspy.HighsVarType.kInteger:
-                    has_integer_vars = True
-                    break
-        
-        if has_integer_vars:
-            # For MIP problems, HiGHS provides mip_gap
-            return info.mip_gap
-        else:
-            # For LP problems, the gap is 0 at optimum
-            return 0.0
-    
-    cpdef get_row_prim(self, int i):
-        r"""
-        Return the value of the auxiliary variable associated with i-th row.
-
-        .. NOTE::
-
-           Behaviour is undefined unless ``solve`` has been called before.
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: lp = get_solver(solver='HiGHS')
-            sage: lp.add_variables(3)
-            2
-            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [8, 6, 1])), None, 48)
-            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [4, 2, 1.5])), None, 20)
-            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [2, 1.5, 0.5])), None, 8)
-            sage: lp.set_objective([60, 30, 20])
-            sage: lp.solve()
-            0
-            sage: lp.get_objective_value()
-            280.0
-            sage: lp.get_row_prim(0)
-            24.0
-            sage: lp.get_row_prim(1)
-            20.0
-            sage: lp.get_row_prim(2)
-            8.0
-
-        TESTS:
-
-        We sanity check the input::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.get_row_prim(2)
-            Traceback (most recent call last):
-            ...
-            ValueError: invalid row index 2
-        """
-        if i < 0 or i >= self.nrows():
-            raise ValueError(f"invalid row index {i}")
-        
-        solution = self.highs_model.getSolution()
-        return solution.row_value[i]
-    
-    cpdef double get_row_dual(self, int i) except? -1:
-        r"""
-        Return the dual value of a constraint.
-
-        The dual value of the i-th row is also the value of the i-th variable
-        of the dual problem.
-
-        The dual value of a constraint is the shadow price of the constraint.
-        The shadow price is the amount by which the objective value will change
-        if the constraint's bounds change by one unit under the precondition
-        that the basis remains the same.
-
-        INPUT:
-
-        - ``i`` -- the index of the constraint
-
-        .. NOTE::
-
-           Behaviour is undefined unless ``solve`` has been called before.
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: lp = get_solver(solver='HiGHS')
-            sage: lp.add_variables(3)
-            2
-            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [8, 6, 1])), None, 48)
-            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [4, 2, 1.5])), None, 20)
-            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [2, 1.5, 0.5])), None, 8)
-            sage: lp.set_objective([60, 30, 20])
-            sage: lp.solve()
-            0
-            sage: lp.get_row_dual(0)   # tol 1e-6
-            0.0
-            sage: lp.get_row_dual(1)   # tol 1e-6
-            10.0
-            sage: lp.get_row_dual(2)   # tol 1e-6
-            10.0
-
-        TESTS:
-
-        We sanity check the input::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.get_row_dual(2)
-            Traceback (most recent call last):
-            ...
-            ValueError: invalid row index 2
-        """
-        if i < 0 or i >= self.nrows():
-            raise ValueError(f"invalid row index {i}")
-        
-        solution = self.highs_model.getSolution()
-        return solution.row_dual[i]
-    
-    cpdef double get_col_dual(self, int j) except? -1:
-        """
-        Return the dual value (reduced cost) of a variable.
-
-        The dual value is the reduced cost of a variable.
-        The reduced cost is the amount by which the objective coefficient
-        of a non-basic variable has to change to become a basic variable.
-
-        INPUT:
-
-        - ``j`` -- the index of the variable
-
-        .. NOTE::
-
-           Behaviour is undefined unless ``solve`` has been called before.
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.add_variables(3)
-            2
-            sage: p.add_linear_constraint(list(zip([0, 1, 2], [8, 6, 1])), None, 48)
-            sage: p.add_linear_constraint(list(zip([0, 1, 2], [4, 2, 1.5])), None, 20)
-            sage: p.add_linear_constraint(list(zip([0, 1, 2], [2, 1.5, 0.5])), None, 8)
-            sage: p.set_objective([60, 30, 20])
-            sage: p.solve()
-            0
-            sage: p.get_col_dual(0)    # tol 1e-6
-            0.0
-            sage: p.get_col_dual(1)    # tol 1e-6
-            -5.0
-            sage: p.get_col_dual(2)    # tol 1e-6
-            0.0
-
-        TESTS:
-
-        We sanity check the input::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.get_col_dual(2)
-            Traceback (most recent call last):
-            ...
-            ValueError: invalid column index 2
-        """
-        if j < 0 or j >= self.ncols():
-            raise ValueError(f"invalid column index {j}")
-        
-        solution = self.highs_model.getSolution()
-        return solution.col_dual[j]
     
     cpdef int ncols(self) noexcept:
         """
@@ -985,51 +1084,355 @@ cdef class HiGHSBackend(GenericBackend):
             sage: p.is_maximization()           
             True
         """
-        import highspy
-        lp = self.highs_model.getLp()
-        return lp.sense_ == highspy.ObjSense.kMaximize
+        cdef HighsInt sense, status
+        status = Highs_getObjectiveSense(self.highs, &sense)
+        if status != kHighsStatusOk:
+            return True  # default to maximize
+        return sense == kHighsObjSenseMaximize
     
-    cpdef __copy__(self):
+    cpdef get_row_prim(self, int i):
         """
-        Return a copy of ``self``.
+        Return the value of the auxiliary variable associated with i-th row.
+
+        .. NOTE::
+
+           Behaviour is undefined unless ``solve`` has been called before.
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: lp = get_solver(solver='HiGHS')
+            sage: lp.add_variables(3)
+            2
+            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [8, 6, 1])), None, 48)
+            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [4, 2, 1.5])), None, 20)
+            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [2, 1.5, 0.5])), None, 8)
+            sage: lp.set_objective([60, 30, 20])
+            sage: lp.solve()
+            0
+            sage: lp.get_objective_value()
+            280.0
+            sage: lp.get_row_prim(0)
+            24.0
+            sage: lp.get_row_prim(1)
+            20.0
+            sage: lp.get_row_prim(2)
+            8.0
+
+        TESTS:
+
+        We sanity check the input::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.get_row_prim(2)
+            Traceback (most recent call last):
+            ...
+            ValueError: Row index 2 out of range ...
+        """
+        cdef double* row_value
+        cdef HighsInt num_rows
+        cdef HighsInt status
+        cdef double result
+        
+        num_rows = Highs_getNumRow(self.highs)
+        
+        if i < 0 or i >= num_rows:
+            raise ValueError(f"Row index {i} out of range [0, {num_rows})")
+        
+        row_value = <double*> malloc(num_rows * sizeof(double))
+        if row_value == NULL:
+            raise MemoryError("Failed to allocate memory")
+        
+        try:
+            sig_on()
+            status = Highs_getSolution(self.highs, NULL, NULL, row_value, NULL)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to get solution")
+            
+            result = row_value[i]
+        finally:
+            free(row_value)
+        
+        return result
+    
+    cpdef double get_row_dual(self, int i) except? -1:
+        """
+        Return the dual value of a constraint.
+
+        The dual value of the i-th row is also the value of the i-th variable
+        of the dual problem.
+
+        The dual value of a constraint is the shadow price of the constraint.
+        The shadow price is the amount by which the objective value will change
+        if the constraint's bounds change by one unit under the precondition
+        that the basis remains the same.
+
+        INPUT:
+
+        - ``i`` -- the index of the constraint
+
+        .. NOTE::
+
+           Behaviour is undefined unless ``solve`` has been called before.
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: lp = get_solver(solver='HiGHS')
+            sage: lp.add_variables(3)
+            2
+            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [8, 6, 1])), None, 48)
+            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [4, 2, 1.5])), None, 20)
+            sage: lp.add_linear_constraint(list(zip([0, 1, 2], [2, 1.5, 0.5])), None, 8)
+            sage: lp.set_objective([60, 30, 20])
+            sage: lp.solve()
+            0
+            sage: lp.get_row_dual(0)   # tol 1e-6
+            0.0
+            sage: lp.get_row_dual(1)   # tol 1e-6
+            10.0
+            sage: lp.get_row_dual(2)   # tol 1e-6
+            10.0
+
+        TESTS:
+
+        We sanity check the input::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.get_row_dual(2)
+            Traceback (most recent call last):
+            ...
+            ValueError: Row index 2 out of range ...
+        """
+        cdef double* row_dual
+        cdef HighsInt num_rows
+        cdef HighsInt status
+        cdef double result
+        
+        num_rows = Highs_getNumRow(self.highs)
+        
+        if i < 0 or i >= num_rows:
+            raise ValueError(f"Row index {i} out of range [0, {num_rows})")
+        
+        row_dual = <double*> malloc(num_rows * sizeof(double))
+        if row_dual == NULL:
+            raise MemoryError("Failed to allocate memory")
+        
+        try:
+            sig_on()
+            status = Highs_getSolution(self.highs, NULL, NULL, NULL, row_dual)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to get dual solution")
+            
+            result = row_dual[i]
+        finally:
+            free(row_dual)
+        
+        return result
+    
+    cpdef double get_col_dual(self, int j) except? -1:
+        """
+        Return the dual value (reduced cost) of a variable.
+
+        The dual value is the reduced cost of a variable.
+        The reduced cost is the amount by which the objective coefficient
+        of a non-basic variable has to change to become a basic variable.
+
+        INPUT:
+
+        - ``j`` -- the index of the variable
+
+        .. NOTE::
+
+           Behaviour is undefined unless ``solve`` has been called before.
 
         EXAMPLES::
 
             sage: from sage.numerical.backends.generic_backend import get_solver
             sage: p = get_solver(solver='HiGHS')
-            sage: p.add_variables(2)            
-            1
-            sage: q = copy(p)                   
-            sage: q.ncols()                     
+            sage: p.add_variables(3)
             2
+            sage: p.add_linear_constraint(list(zip([0, 1, 2], [8, 6, 1])), None, 48)
+            sage: p.add_linear_constraint(list(zip([0, 1, 2], [4, 2, 1.5])), None, 20)
+            sage: p.add_linear_constraint(list(zip([0, 1, 2], [2, 1.5, 0.5])), None, 8)
+            sage: p.set_objective([60, 30, 20])
+            sage: p.solve()
+            0
+            sage: p.get_col_dual(0)    # tol 1e-6
+            0.0
+            sage: p.get_col_dual(1)    # tol 1e-6
+            -5.0
+            sage: p.get_col_dual(2)    # tol 1e-6
+            0.0
+
+        TESTS:
+
+        We sanity check the input::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.get_col_dual(2)
+            Traceback (most recent call last):
+            ...
+            ValueError: Variable index 2 out of range ...
         """
-        import highspy
-        import tempfile
-        import os
+        cdef double* col_dual
+        cdef HighsInt num_cols
+        cdef HighsInt status
+        cdef double result
         
-        cdef HiGHSBackend p = type(self)(maximization=self.is_maximization())
+        num_cols = Highs_getNumCol(self.highs)
         
-        # Copy by writing and reading through a temporary MPS file
-        # since Highs objects cannot be directly copied
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.mps', delete=False) as f:
-            temp_file = f.name
+        if j < 0 or j >= num_cols:
+            raise ValueError(f"Variable index {j} out of range [0, {num_cols})")
+        
+        col_dual = <double*> malloc(num_cols * sizeof(double))
+        if col_dual == NULL:
+            raise MemoryError("Failed to allocate memory")
         
         try:
-            self.highs_model.writeModel(temp_file)
-            p.highs_model.readModel(temp_file)
-            p.highs_model.setOptionValue("log_to_console", False)
+            sig_on()
+            status = Highs_getSolution(self.highs, NULL, col_dual, NULL, NULL)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to get dual solution")
+            
+            result = col_dual[j]
         finally:
-            if os.path.exists(temp_file):
-                os.unlink(temp_file)
+            free(col_dual)
         
-        p.prob_name = self.prob_name
-        p.col_name_var = copy(self.col_name_var)
-        p.row_name_var = copy(self.row_name_var)
-        p.row_data_cache = copy(self.row_data_cache)
-        p.numcols = self.numcols
-        p.numrows = self.numrows
-        p.obj_constant_term = self.obj_constant_term
-        return p
+        return result
+    
+    cpdef best_known_objective_bound(self):
+        """
+        Return the value of the currently best known bound.
+
+        This method returns the current best upper (resp. lower) bound on the
+        optimal value of the objective function in a maximization
+        (resp. minimization) problem. It is equal to the output of
+        :meth:`get_objective_value` if the MILP found an optimal solution, but
+        it can differ if it was interrupted manually or after a time limit (cf
+        :meth:`solver_parameter`).
+
+        .. NOTE::
+
+           Has no meaning unless ``solve`` has been called before.
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.add_variables(2)
+            1
+            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
+            sage: p.set_objective([1, 1])
+            sage: p.solve()
+            0
+            sage: p.best_known_objective_bound()
+            2.0
+
+        TESTS::
+            sage: # needs sage.graphs
+            sage: g = graphs.CubeGraph(9)
+            sage: p = MixedIntegerLinearProgram(solver='HiGHS')
+            sage: p.solver_parameter("mip_rel_gap",100)
+            sage: b = p.new_variable(binary=True)
+            sage: p.set_objective(p.sum(b[v] for v in g))
+            sage: for v in g:
+            ....:     p.add_constraint(b[v]+p.sum(b[u] for u in g.neighbors(v)) <= 1)
+            sage: p.add_constraint(b[v] == 1) # Force an easy non-0 solution
+            sage: p.solve() # rel tol 100
+            2.0
+            sage: backend = p.get_backend()
+            sage: backend.best_known_objective_bound()
+            48.0
+        """
+        cdef double mip_dual_bound
+        cdef HighsInt status
+        cdef HighsInt i, var_type
+        cdef bint is_mip = False
+        
+        # Check if this is a MIP problem (has integer variables)
+        for i in range(self.numcols):
+            status = Highs_getColIntegrality(self.highs, i, &var_type)
+            if status != kHighsStatusOk:
+                continue
+            if var_type == kHighsVarTypeInteger:
+                is_mip = True
+                break
+        
+        if not is_mip:
+            # For LP problems, the bound equals the objective value
+            return self.get_objective_value()
+        
+        # Get the MIP dual bound using info query
+        status = Highs_getDoubleInfoValue(self.highs, b"mip_dual_bound", &mip_dual_bound)
+        if status != kHighsStatusOk:
+            # If not available, return the objective value
+            return ValueError("MIP dual bound not available")
+        # HiGHS already includes the offset in the dual bound
+        return mip_dual_bound
+    
+    cpdef get_relative_objective_gap(self):
+        """
+        Return the relative objective gap of the best known solution.
+
+        For a minimization problem, this value is computed by
+        `(\texttt{bestinteger} - \texttt{bestobjective}) / (1e-10 +
+        |\texttt{bestobjective}|)`, where ``bestinteger`` is the value returned
+        by :meth:`get_objective_value` and ``bestobjective`` is the value
+        returned by :meth:`best_known_objective_bound`. For a maximization
+        problem, the value is computed by `(\texttt{bestobjective} -
+        \texttt{bestinteger}) / (1e-10 + |\texttt:bestobjective}|)`.
+
+        .. NOTE::
+
+           Has no meaning unless ``solve`` has been called before.
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.add_variables(2)
+            1
+            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
+            sage: p.set_objective([1, 1])
+            sage: p.solve()
+            0
+            sage: p.get_relative_objective_gap()
+            0.0
+        """
+        cdef double gap
+        cdef HighsInt status
+        cdef HighsInt i, var_type
+        cdef bint is_mip = False
+        
+        # Check if this is a MIP problem (has integer variables)
+        for i in range(self.numcols):
+            status = Highs_getColIntegrality(self.highs, i, &var_type)
+            if status != kHighsStatusOk:
+                continue
+            if var_type == kHighsVarTypeInteger:
+                is_mip = True
+                break
+        
+        if not is_mip:
+            # For LP problems, the gap is 0
+            return 0.0
+        
+        # Get the MIP gap using info query
+        status = Highs_getDoubleInfoValue(self.highs, b"mip_gap", &gap)
+        if status != kHighsStatusOk:
+            # If not available, return 0
+            return ValueError("MIP gap not available")
+        return gap
     
     cpdef variable_upper_bound(self, int index, value=None):
         """
@@ -1072,26 +1475,35 @@ cdef class HiGHSBackend(GenericBackend):
             ...
             ValueError: invalid variable index 3
         """
-        if index < 0 or index >= self.ncols():
+        cdef double lb, ub
+        cdef HighsInt status
+        
+        if index < 0 or index >= self.numcols:
             raise ValueError(f"invalid variable index {index}")
         
-        import highspy
-        
         if value is None:
-            lp = self.highs_model.getLp()
-            ub = lp.col_upper_[index]
-            if ub >= highspy.kHighsInf:
+            # Get current bound
+            self._get_col_bounds(index, &lb, &ub)
+            
+            if ub >= Highs_getInfinity(self.highs) - 1:
                 return None
-            return ub
-        else:
-            lb = self.variable_lower_bound(index)
-            if lb is None:
-                lb = -highspy.kHighsInf
-            if value is None:
-                value = highspy.kHighsInf
             else:
-                value = float(value)
-            self.highs_model.changeColBounds(index, lb, value)
+                return ub
+        else:
+            # Set new bound
+            self._get_col_bounds(index, &lb, &ub)
+            
+            if value is None:
+                ub = Highs_getInfinity(self.highs)
+            else:
+                ub = float(value)
+            
+            sig_on()
+            status = Highs_changeColBounds(self.highs, index, lb, ub)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to set variable upper bound")
     
     cpdef variable_lower_bound(self, int index, value=None):
         """
@@ -1135,26 +1547,35 @@ cdef class HiGHSBackend(GenericBackend):
             ...
             ValueError: invalid variable index 3
         """
-        if index < 0 or index >= self.ncols():
+        cdef double lb, ub
+        cdef HighsInt status
+        
+        if index < 0 or index >= self.numcols:
             raise ValueError(f"invalid variable index {index}")
         
-        import highspy
-        
         if value is None:
-            lp = self.highs_model.getLp()
-            lb = lp.col_lower_[index]
-            if lb <= -highspy.kHighsInf:
+            # Get current bound
+            self._get_col_bounds(index, &lb, &ub)
+            
+            if lb <= -Highs_getInfinity(self.highs) - 1:
                 return None
-            return lb
-        else:
-            ub = self.variable_upper_bound(index)
-            if ub is None:
-                ub = highspy.kHighsInf
-            if value is None:
-                value = -highspy.kHighsInf
             else:
-                value = float(value)
-            self.highs_model.changeColBounds(index, value, ub)
+                return lb
+        else:
+            # Set new bound
+            self._get_col_bounds(index, &lb, &ub)
+            
+            if value is None:
+                lb = -Highs_getInfinity(self.highs)
+            else:
+                lb = float(value)
+            
+            sig_on()
+            status = Highs_changeColBounds(self.highs, index, lb, ub)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to set variable lower bound")
     
     cpdef col_name(self, int index):
         """
@@ -1173,7 +1594,7 @@ cdef class HiGHSBackend(GenericBackend):
             sage: p.col_name(0)
             'x'
         """
-        if index < 0 or index >= self.ncols():
+        if index < 0 or index >= self.numcols:
             raise ValueError(f"invalid column index {index}")
         return self.col_name_var.get(index, f"x_{index}")
     
@@ -1203,22 +1624,25 @@ cdef class HiGHSBackend(GenericBackend):
             sage: p.col_bounds(0)
             (0.0, 5.0)
         """
-        import highspy
-        if index < 0 or index >= self.ncols():
-            raise ValueError(f"invalid column index {index}")
+        cdef double lb, ub
         
-        lp = self.highs_model.getLp()
-        lower = lp.col_lower_[index]
-        upper = lp.col_upper_[index]
+        if index < 0 or index >= self.numcols:
+            raise ValueError(f"invalid variable index {index}")
         
-        # HiGHS uses very large negative/positive values for infinity
-        # Check with a threshold rather than exact comparison
-        if lower <= -1e20:
-            lower = None
-        if upper >= 1e20:
-            upper = None
-            
-        return (lower, upper)
+        self._get_col_bounds(index, &lb, &ub)
+        
+        # Convert infinities to None
+        if lb <= -Highs_getInfinity(self.highs) + 1:
+            lb_ret = None
+        else:
+            lb_ret = lb
+        
+        if ub >= Highs_getInfinity(self.highs) - 1:
+            ub_ret = None
+        else:
+            ub_ret = ub
+        
+        return (lb_ret, ub_ret)
     
     cpdef bint is_variable_integer(self, int index) noexcept:
         """
@@ -1250,13 +1674,15 @@ cdef class HiGHSBackend(GenericBackend):
             sage: p.is_variable_integer(2)
             False
         """
-        import highspy
-        if index < 0 or index >= self.ncols():
+        cdef HighsInt integrality, status
+        
+        if index < 0 or index >= self.numcols:
             return False
-        lp = self.highs_model.getLp()
-        if index >= len(lp.integrality_):
+        
+        status = Highs_getColIntegrality(self.highs, index, &integrality)
+        if status != kHighsStatusOk:
             return False
-        return lp.integrality_[index] == highspy.HighsVarType.kInteger
+        return integrality == kHighsVarTypeInteger
     
     cpdef bint is_variable_binary(self, int index) noexcept:
         """
@@ -1288,16 +1714,20 @@ cdef class HiGHSBackend(GenericBackend):
             sage: p.is_variable_binary(2)
             False
         """
-        import highspy
-        if index < 0 or index >= self.ncols():
+        cdef HighsInt integrality, status
+        cdef double lb, ub
+        
+        if index < 0 or index >= self.numcols:
             return False
-        lp = self.highs_model.getLp()
-        if index >= len(lp.integrality_):
+        
+        status = Highs_getColIntegrality(self.highs, index, &integrality)
+        if status != kHighsStatusOk:
             return False
-        if lp.integrality_[index] == highspy.HighsVarType.kInteger:
-            lower = lp.col_lower_[index]
-            upper = lp.col_upper_[index]
-            return lower == 0.0 and upper == 1.0
+            
+        if integrality == kHighsVarTypeInteger:
+            self._get_col_bounds(index, &lb, &ub)
+            return lb == 0.0 and ub == 1.0
+        
         return False
     
     cpdef bint is_variable_continuous(self, int index) noexcept:
@@ -1326,13 +1756,15 @@ cdef class HiGHSBackend(GenericBackend):
             sage: p.is_variable_continuous(2)
             False
         """
-        import highspy
-        if index < 0 or index >= self.ncols():
+        cdef HighsInt integrality, status
+        
+        if index < 0 or index >= self.numcols:
             return False
-        lp = self.highs_model.getLp()
-        if index >= len(lp.integrality_):
-            return True  # Default to continuous
-        return lp.integrality_[index] == highspy.HighsVarType.kContinuous
+        
+        status = Highs_getColIntegrality(self.highs, index, &integrality)
+        if status != kHighsStatusOk:
+            return True  # default to continuous
+        return integrality == kHighsVarTypeContinuous
     
     cpdef set_variable_type(self, int variable, int vtype):
         """
@@ -1371,22 +1803,498 @@ cdef class HiGHSBackend(GenericBackend):
             ...
             ValueError: invalid variable index 2
         """
-        if variable < 0 or variable >= self.ncols():
+        cdef HighsInt status
+        cdef double lb, ub
+        
+        if variable < 0 or variable >= self.numcols:
             raise ValueError(f"invalid variable index {variable}")
         
-        import highspy
         if vtype == 1:
             # Integer
-            self.highs_model.changeColIntegrality(variable, highspy.HighsVarType.kInteger)
+            sig_on()
+            status = Highs_changeColIntegrality(self.highs, variable, kHighsVarTypeInteger)
+            sig_off()
         elif vtype == 0:
-            # Binary
-            self.highs_model.changeColIntegrality(variable, highspy.HighsVarType.kInteger)
-            self.highs_model.changeColBounds(variable, 0.0, 1.0)
+            # Binary - set to integer and change bounds to [0,1]
+            sig_on()
+            status = Highs_changeColIntegrality(self.highs, variable, kHighsVarTypeInteger)
+            sig_off()
+            
+            if status == kHighsStatusOk:
+                sig_on()
+                status = Highs_changeColBounds(self.highs, variable, 0.0, 1.0)
+                sig_off()
         elif vtype == -1:
-            # Real (Continuous)
-            self.highs_model.changeColIntegrality(variable, highspy.HighsVarType.kContinuous)
+            # Continuous
+            sig_on()
+            status = Highs_changeColIntegrality(self.highs, variable, kHighsVarTypeContinuous)
+            sig_off()
         else:
             raise ValueError(f"Unknown variable type {vtype}")
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to set variable type")
+    
+    cpdef row_bounds(self, int index):
+        """
+        Return the bounds of a specific constraint.
+
+        INPUT:
+
+        - ``index`` -- integer; the constraint's id
+
+        OUTPUT:
+
+        A pair ``(lower_bound, upper_bound)``. Each of them can be set
+        to ``None`` if the constraint is not bounded in the
+        corresponding direction, and is a real value otherwise.
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.add_variables(5)
+            4
+            sage: p.add_linear_constraint(list(zip(range(5), range(5))), 2, 2)
+            sage: p.row(0)  # Note: zero coefficients are excluded in sparse format
+            ([1, 2, 3, 4], [1.0, 2.0, 3.0, 4.0])
+            sage: p.row_bounds(0)
+            (2.0, 2.0)
+        """
+        cdef double lb, ub
+        cdef double infinity
+        
+        if index < 0 or index >= self.numrows:
+            raise ValueError(f"invalid row index {index}")
+        
+        self._get_row_bounds(index, &lb, &ub)
+        infinity = Highs_getInfinity(self.highs)
+        
+        return (
+            (lb if abs(lb) < infinity else None),
+            (ub if abs(ub) < infinity else None)
+        )
+    
+    cpdef row_name(self, int index):
+        """
+        Return the ``index``-th row name.
+
+        INPUT:
+
+        - ``index`` -- integer; the row's id
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.add_linear_constraint([], 2, 2, name='foo')
+            sage: p.row_name(0)
+            'foo'
+        """
+        if index < 0 or index >= self.numrows:
+            raise ValueError(f"invalid row index {index}")
+        
+        # Search for name in dictionary
+        for name, idx in self.row_name_var.items():
+            if idx == index:
+                return str(name)
+        
+        return f"constraint_{index}"
+    
+    cpdef solver_parameter(self, name, value=None):
+        """
+        Return or define a solver parameter.
+
+        INPUT:
+
+        - ``name`` -- string; the parameter name
+
+        - ``value`` -- the parameter's value if it is to be defined,
+          or ``None`` (default) to obtain its current value
+
+        HiGHS solver parameters can be set using their option names as documented
+        in the HiGHS documentation: https://ergo-code.github.io/HiGHS/dev/options/definitions/
+
+        Common parameters include:
+
+        - ``time_limit`` -- maximum time in seconds (double)
+        - ``mip_rel_gap`` -- relative MIP gap tolerance (double)
+        - ``mip_abs_gap`` -- absolute MIP gap tolerance (double)
+        - ``threads`` -- number of threads to use (int)
+        - ``presolve`` -- presolve option: "off", "choose", or "on"
+        - ``solver`` -- solver to use: "choose", "simplex", "ipm", or "pdlp (need CUDA)"
+        - ``parallel`` -- parallel option: "off", "choose", or "on"
+        - ``log_to_console`` -- whether to log to console: True or False
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.solver_parameter("time_limit", 60)
+            sage: p.solver_parameter("time_limit")
+            60.0
+            sage: p.solver_parameter("threads", 2)
+            sage: p.solver_parameter("threads")
+            2
+            sage: p.solver_parameter("presolve", "on")
+            sage: p.solver_parameter("presolve")
+            'on'
+
+        You can also use boolean values for options::
+
+            sage: p.solver_parameter("log_to_console", False)
+            sage: p.solver_parameter("log_to_console")
+            False
+
+        Float parameters like MIP gap tolerance work correctly::
+
+            sage: p.solver_parameter("mip_rel_gap", 0.05)
+            sage: p.solver_parameter("mip_rel_gap")
+            0.05
+        """
+        cdef HighsInt status
+        cdef bytes name_bytes
+        cdef HighsInt int_value
+        cdef double double_value
+        cdef HighsInt bool_value
+        cdef char* str_value
+        cdef HighsInt option_type
+        
+        name_bytes = str(name).encode('utf-8')
+        
+        if value is None:
+            # Get parameter - try each type until one succeeds
+            # Try int first
+            status = Highs_getIntOptionValue(self.highs, name_bytes, &int_value)
+            if status == kHighsStatusOk:
+                return int_value
+            
+            # Try double
+            status = Highs_getDoubleOptionValue(self.highs, name_bytes, &double_value)
+            if status == kHighsStatusOk:
+                return double_value
+            
+            # Try bool
+            status = Highs_getBoolOptionValue(self.highs, name_bytes, &bool_value)
+            if status == kHighsStatusOk:
+                return bool(bool_value)
+            
+            # Try string (allocate buffer for string value)
+            str_value = <char*> malloc(256 * sizeof(char))
+            if str_value == NULL:
+                raise MemoryError("Failed to allocate memory for string option")
+            try:
+                status = Highs_getStringOptionValue(self.highs, name_bytes, str_value)
+                if status == kHighsStatusOk:
+                    result = str_value.decode('utf-8')
+                    return result
+                else:
+                    raise ValueError(f"Unknown option {name}")
+            finally:
+                free(str_value)
+        else:
+            # Set parameter - need to determine type
+            # Convert Sage types to Python types for easier type checking
+            try:
+                # Try to convert to Python numeric type if it's a Sage type
+                # Check for float first since int() would truncate floats
+                if isinstance(value, float):
+                    pass  # Already a Python float
+                elif hasattr(value, '__float__') and not isinstance(value, (bool, str, int)):
+                    value = float(value)
+                elif hasattr(value, '__int__') and not isinstance(value, (bool, str, float)):
+                    value = int(value)
+            except (TypeError, AttributeError):
+                pass
+            
+            # Check bool first since bool is a subclass of int in Python
+            if isinstance(value, bool):
+                status = Highs_setBoolOptionValue(self.highs, name_bytes, value)
+            elif isinstance(value, str):
+                value_bytes = value.encode('utf-8')
+                status = Highs_setStringOptionValue(self.highs, name_bytes, value_bytes)
+            elif isinstance(value, (int, float)):
+                # Try as double first (works for both int and float)
+                status = Highs_setDoubleOptionValue(self.highs, name_bytes, float(value))
+                if status != kHighsStatusOk and isinstance(value, int):
+                    # If double failed and it's an int, try as int
+                    status = Highs_setIntOptionValue(self.highs, name_bytes, value)
+                if status != kHighsStatusOk:
+                    # If both numeric methods failed, try as string (works for advanced options)
+                    # For floats that are whole numbers, convert to int string to avoid "4.0" format
+                    if isinstance(value, float) and value == int(value):
+                        value_bytes = str(int(value)).encode('utf-8')
+                    else:
+                        value_bytes = str(value).encode('utf-8')
+                    status = Highs_setStringOptionValue(self.highs, name_bytes, value_bytes)
+            else:
+                raise ValueError(f"Unknown parameter type for {name}: {type(value)}")
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException(f"HiGHS: Failed to set parameter {name}")
+    
+    cpdef write_lp(self, filename):
+        """
+        Write the problem to a .lp file.
+
+        INPUT:
+
+        - ``filename`` -- string; the file name
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.add_variables(2)            
+            1
+            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
+            sage: import tempfile                                     
+            sage: with tempfile.NamedTemporaryFile(suffix='.lp') as f:
+            ....:     p.write_lp(f.name)
+        """
+        cdef bytes filename_bytes
+        cdef HighsInt status
+        
+        filename_bytes = str(filename).encode('utf-8')
+        
+        status = Highs_writeModel(self.highs, filename_bytes)
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException(f"HiGHS: Failed to write LP file {filename}")
+    
+    cpdef write_mps(self, filename, int modern):
+        """
+        Write the problem to a .mps file.
+
+        INPUT:
+
+        - ``filename`` -- string; the file name
+        - ``modern`` -- integer; whether to use modern MPS format (ignored for HiGHS)
+
+        .. NOTE::
+
+            HiGHS may not support writing MPS files directly. If writing fails,
+            consider using write_lp() instead, or use another solver for MPS output.
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.add_variables(2)            
+            1
+            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
+            sage: import tempfile                                     
+            sage: with tempfile.NamedTemporaryFile(suffix='.mps') as f:  # doctest: +SKIP
+            ....:     p.write_mps(f.name, 1)
+        """
+        cdef bytes filename_bytes
+        cdef HighsInt status
+        
+        filename_bytes = str(filename).encode('utf-8')
+        
+        status = Highs_writeModel(self.highs, filename_bytes)
+        
+        if status != kHighsStatusOk:
+            # HiGHS may not support MPS write. Try converting filename to .lp temporarily
+            import os
+            base, ext = os.path.splitext(filename)
+            if ext.lower() == '.mps':
+                # Try writing as LP first, then convert if needed
+                # For now, just inform the user
+                raise MIPSolverException(
+                    f"HiGHS: Failed to write MPS file {filename}. "
+                    "HiGHS may not support writing MPS files directly. "
+                    "Consider using write_lp() instead."
+                )
+            raise MIPSolverException(f"HiGHS: Failed to write MPS file {filename}")
+    
+    cpdef remove_constraint(self, int i):
+        """
+        Remove a constraint from ``self``.
+
+        INPUT:
+
+        - ``i`` -- index of the constraint to remove
+
+        EXAMPLES::
+
+            sage: p = MixedIntegerLinearProgram(solver='HiGHS')
+            sage: x, y = p['x'], p['y']
+            sage: p.add_constraint(2*x + 3*y <= 6)
+            sage: p.add_constraint(3*x + 2*y <= 6)
+            sage: p.add_constraint(x >= 0)
+            sage: p.set_objective(x + y + 7)
+            sage: p.set_integer(x); p.set_integer(y)
+            sage: p.solve()
+            9.0
+            sage: p.remove_constraint(0)
+            sage: p.solve()
+            10.0
+
+        Removing fancy constraints does not make Sage crash::
+
+            sage: MixedIntegerLinearProgram(solver = "HiGHS").remove_constraint(-2)
+            Traceback (most recent call last):
+            ...
+            ValueError: The constraint's index i must satisfy 0 <= i < number_of_constraints
+        """
+        cdef HighsInt status
+        
+        if i < 0 or i >= self.numrows:
+            raise ValueError("The constraint's index i must satisfy 0 <= i < number_of_constraints")
+        
+        # Delete the single row
+        sig_on()
+        status = Highs_deleteRowsByRange(self.highs, i, i)
+        sig_off()
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to remove constraint")
+        
+        self.numrows -= 1
+        
+        # Update row name mapping
+        names_to_update = {}
+        names_to_remove = []
+        for name, row_idx in self.row_name_var.items():
+            if row_idx < i:
+                names_to_update[name] = row_idx
+            elif row_idx > i:
+                names_to_update[name] = row_idx - 1
+            else:
+                names_to_remove.append(name)
+        
+        for name in names_to_remove:
+            del self.row_name_var[name]
+        self.row_name_var.update(names_to_update)
+    
+    cpdef remove_constraints(self, constraints):
+        """
+        Remove several constraints.
+
+        INPUT:
+
+        - ``constraints`` -- an iterable containing the indices of the rows to remove
+
+        EXAMPLES::
+
+            sage: p = MixedIntegerLinearProgram(solver='HiGHS')
+            sage: x, y = p['x'], p['y']
+            sage: p.add_constraint(2*x + 3*y <= 6)
+            sage: p.add_constraint(3*x + 2*y <= 6)
+            sage: p.add_constraint(x >= 0)
+            sage: p.set_objective(x + y + 7)
+            sage: p.set_integer(x); p.set_integer(y)
+            sage: p.solve()
+            9.0
+            sage: p.remove_constraints([0])
+            sage: p.solve()
+            10.0
+            sage: p.get_values([x,y])
+            [-0.0, 3.0]
+
+        TESTS:
+
+        Removing fancy constraints does not make Sage crash::
+
+            sage: MixedIntegerLinearProgram(solver="HiGHS").remove_constraints([0, -2])
+            Traceback (most recent call last):
+            ...
+            ValueError: The constraint's index i must satisfy 0 <= i < number_of_constraints
+        """
+        if isinstance(constraints, int):
+            self.remove_constraint(constraints)
+            return
+        
+        cdef int last = self.nrows() + 1
+        
+        for c in sorted(constraints, reverse=True):
+            if c != last:
+                self.remove_constraint(c)
+                last = c
+    
+    cpdef row(self, int index):
+        """
+        Return the ``index``-th constraint as a pair of lists.
+
+        INPUT:
+
+        - ``index`` -- index of the constraint
+
+        OUTPUT:
+
+        A pair ``(indices, coeffs)`` where ``indices`` lists the
+        entries whose coefficient is nonzero, and to which ``coeffs``
+        associates their coefficient in the order of `indices`.
+
+        EXAMPLES::
+
+            sage: from sage.numerical.backends.generic_backend import get_solver
+            sage: p = get_solver(solver='HiGHS')
+            sage: p.add_variables(5)
+            4
+            sage: p.add_linear_constraint(list(zip(range(5), range(5))), 2, 2)
+            sage: p.row(0)  # Note: zero coefficients are excluded in sparse format
+            ([1, 2, 3, 4], [1.0, 2.0, 3.0, 4.0])
+            sage: p.row(1)
+            Traceback (most recent call last):
+            ...
+            ValueError: invalid row index 1
+        """
+        cdef HighsInt num_row, num_nz, matrix_start
+        cdef HighsInt* matrix_index
+        cdef double* matrix_value
+        cdef double lb, ub
+        cdef HighsInt status
+        cdef list indices = []
+        cdef list coeffs = []
+        cdef int j
+        
+        if index < 0 or index >= self.numrows:
+            raise ValueError(f"invalid row index {index}")
+        
+        # First call: get the number of non-zeros
+        sig_on()
+        status = Highs_getRowsByRange(self.highs, index, index,
+                                      &num_row, &lb, &ub, &num_nz,
+                                      NULL, NULL, NULL)
+        sig_off()
+        
+        if status != kHighsStatusOk:
+            raise MIPSolverException("HiGHS: Failed to get row info")
+        
+        if num_nz == 0:
+            return ([], [])
+        
+        # Allocate space for the matrix data
+        matrix_index = <HighsInt*> malloc(num_nz * sizeof(HighsInt))
+        matrix_value = <double*> malloc(num_nz * sizeof(double))
+        
+        if matrix_index == NULL or matrix_value == NULL:
+            free(matrix_index)
+            free(matrix_value)
+            raise MemoryError("Failed to allocate memory")
+        
+        try:
+            # Second call: get the actual matrix data
+            sig_on()
+            status = Highs_getRowsByRange(self.highs, index, index,
+                                          &num_row, &lb, &ub, &num_nz,
+                                          &matrix_start, matrix_index, matrix_value)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to get row data")
+            
+            # Extract indices and coefficients
+            for j in range(num_nz):
+                indices.append(matrix_index[j])
+                coeffs.append(matrix_value[j])
+        finally:
+            free(matrix_index)
+            free(matrix_value)
+        
+        return (indices, coeffs)
     
     cpdef add_col(self, indices, coeffs):
         """
@@ -1422,225 +2330,26 @@ cdef class HiGHSBackend(GenericBackend):
             sage: p.nrows()
             5
         """
+        cdef int col_idx
+        cdef int i, constraint_idx
+        cdef HighsInt status
+        
         # Add a new column (variable)
-        cdef int col_idx = self.add_variable(lower_bound=0.0, upper_bound=None)
+        col_idx = self.add_variable(lower_bound=0.0, upper_bound=None)
         
         # Set the coefficients for this column in the existing constraints
-        # HiGHS uses a different API - we need to update the constraint matrix
-        # For each constraint index in indices, we need to add the coefficient
-        # This is done by getting the constraint and updating it
-        import highspy
-        
-        # Get current model info
-        lp = self.highs_model.getLp()
-        
-        # For each constraint where this variable appears
         for i, constraint_idx in enumerate(indices):
             if constraint_idx < 0 or constraint_idx >= self.nrows():
                 continue
             
             coeff = coeffs[i]
             if coeff != 0:
-                # Add this coefficient to the constraint matrix
-                # HiGHS stores the matrix, so we need to add an entry
-                self.highs_model.changeCoeff(constraint_idx, col_idx, float(coeff))
+                sig_on()
+                status = Highs_changeCoeff(self.highs, constraint_idx, col_idx, float(coeff))
+                sig_off()
                 
-                # Update the cached row data
-                if constraint_idx in self.row_data_cache:
-                    cached_indices, cached_coeffs = self.row_data_cache[constraint_idx]
-                    # Add the new column to the cached data
-                    cached_indices = list(cached_indices) + [col_idx]
-                    cached_coeffs = list(cached_coeffs) + [float(coeff)]
-                    self.row_data_cache[constraint_idx] = (cached_indices, cached_coeffs)
-                else:
-                    # Create new cache entry
-                    self.row_data_cache[constraint_idx] = ([col_idx], [float(coeff)])
-    
-    cpdef row(self, int index):
-        """
-        Return a row.
-
-        INPUT:
-
-        - ``index`` -- integer; the constraint's id
-
-        OUTPUT:
-
-        A pair ``(indices, coeffs)`` where ``indices`` lists the
-        entries whose coefficient is nonzero, and to which ``coeffs``
-        associates their coefficient on the model of the
-        ``add_linear_constraint`` method.
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.add_variables(5)
-            4
-            sage: p.add_linear_constraint(list(zip(range(5), range(5))), 2, 2)
-            sage: p.row(0)
-            ([0, 1, 2, 3, 4], [0.0, 1.0, 2.0, 3.0, 4.0])
-            sage: p.row_bounds(0)
-            (2.0, 2.0)
-        """
-        if index < 0 or index >= self.nrows():
-            raise ValueError(f"invalid row index {index}")
-        
-        # Return cached row data if available
-        if index in self.row_data_cache:
-            return self.row_data_cache[index]
-        
-        # Otherwise return empty (constraint was added without coefficients)
-        return ([], [])
-    
-    cpdef row_bounds(self, int index):
-        """
-        Return the bounds of a specific constraint.
-
-        INPUT:
-
-        - ``index`` -- integer; the constraint's id
-
-        OUTPUT:
-
-        A pair ``(lower_bound, upper_bound)``. Each of them can be set
-        to ``None`` if the constraint is not bounded in the
-        corresponding direction, and is a real value otherwise.
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.add_variables(5)
-            4
-            sage: p.add_linear_constraint(list(zip(range(5), range(5))), 2, 2)
-            sage: p.row(0)
-            ([0, 1, 2, 3, 4], [0.0, 1.0, 2.0, 3.0, 4.0])
-            sage: p.row_bounds(0)
-            (2.0, 2.0)
-        """
-        if index < 0 or index >= self.nrows():
-            raise ValueError(f"invalid row index {index}")
-        
-        import highspy
-        
-        # Get the LP model
-        lp = self.highs_model.getLp()
-        
-        # Get bounds for the constraint
-        lower_bound = lp.row_lower_[index]
-        upper_bound = lp.row_upper_[index]
-        
-        # HiGHS uses infinity constants
-        inf = float('inf')
-        
-        # Convert infinities to None
-        lower = lower_bound if lower_bound != -inf and lower_bound > -1e20 else None
-        upper = upper_bound if upper_bound != inf and upper_bound < 1e20 else None
-        
-        return (lower, upper)
-    
-    cpdef row_name(self, int index):
-        """
-        Return the ``index``-th row name.
-
-        INPUT:
-
-        - ``index`` -- integer; the row's id
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.add_linear_constraint([], 2, 2, name='foo')
-            sage: p.row_name(0)
-            'foo'
-        """
-        if index < 0 or index >= self.nrows():
-            raise ValueError(f"invalid row index {index}")
-        
-        # Look up the name in our stored mapping
-        for name, idx in self.row_name_var.items():
-            if idx == index:
-                return name
-        
-        return None
-    
-    cpdef solver_parameter(self, name, value=None):
-        """
-        Return or define a solver parameter.
-
-        INPUT:
-
-        - ``name`` -- string; the parameter name
-
-        - ``value`` -- the parameter's value if it is to be defined,
-          or ``None`` (default) to obtain its current value
-
-        HiGHS solver parameters can be set using their option names as documented
-        in the HiGHS documentation: https://ergo-code.github.io/HiGHS/dev/options/definitions/
-
-        Common parameters include:
-
-        - ``time_limit`` -- maximum time in seconds (double)
-        - ``mip_rel_gap`` -- relative MIP gap tolerance (double)
-        - ``mip_abs_gap`` -- absolute MIP gap tolerance (double)
-        - ``threads`` -- number of threads to use (int)
-        - ``presolve`` -- presolve option: "off", "choose", or "on"
-        - ``solver`` -- solver to use: "choose", "simplex", "ipm", or "pdlp"
-        - ``parallel`` -- parallel option: "off", "choose", or "on"
-        - ``log_to_console`` -- whether to log to console: True or False
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.solver_parameter("time_limit", 60)
-            sage: p.solver_parameter("time_limit")
-            60.0
-            sage: p.solver_parameter("threads", 2)
-            sage: p.solver_parameter("threads")
-            2
-            sage: p.solver_parameter("threads", 4)
-            sage: p.solver_parameter("threads")
-            4
-            sage: p.solver_parameter("presolve", "on")
-            sage: p.solver_parameter("presolve")
-            'on'
-
-        You can also use boolean values for options::
-
-            sage: p.solver_parameter("log_to_console", False)
-            sage: p.solver_parameter("log_to_console")
-            False
-
-        Float parameters like MIP gap tolerance work correctly::
-
-            sage: p.solver_parameter("mip_rel_gap", 0.05)
-            sage: p.solver_parameter("mip_rel_gap")
-            0.05
-        """
-        if value is None:
-            # Get the current value - getOptionValue returns (status, value)
-            status, current_value = self.highs_model.getOptionValue(name)
-            return current_value
-        else:
-            # Set the value
-            # Convert Sage types to native Python types to avoid issues with highspy
-            # highspy doesn't recognize Sage's Integer/RealLiteral and may misinterpret them
-            if isinstance(value, (int, float, bool, str)):
-                # Already a native Python type - use as-is
-                py_value = value
-            elif hasattr(value, 'is_integral') and value.is_integral():
-                # Sage Integer or other integral type
-                py_value = int(value)
-            elif hasattr(value, '__float__'):
-                # Sage RealLiteral or other float-like type
-                py_value = float(value)
-            else:
-                # Other type - try to pass as-is
-                py_value = value
-            self.highs_model.setOptionValue(name, py_value)
+                if status != kHighsStatusOk:
+                    raise MIPSolverException("HiGHS: Failed to set coefficient")
     
     cpdef int get_row_stat(self, int i) except? -1:
         """
@@ -1681,15 +2390,44 @@ cdef class HiGHSBackend(GenericBackend):
             ...
             ValueError: The constraint's index i must satisfy 0 <= i < number_of_constraints
         """
-        if i < 0 or i >= self.nrows():
+        cdef HighsInt* row_status
+        cdef HighsInt* col_status
+        cdef HighsInt num_rows, num_cols
+        cdef HighsInt status
+        cdef HighsInt result
+        
+        if i < 0 or i >= self.numrows:
             raise ValueError("The constraint's index i must satisfy 0 <= i < number_of_constraints")
         
-        cdef object basis = self.highs_model.getBasis()
-        if not basis.valid:
-            raise ValueError("No valid basis available. Solve the problem first.")
+        # Note: HiGHS C API doesn't have getBasisValidity function
+        # We'll try to get the basis and handle errors if no basis exists
         
-        return int(basis.row_status[i])
-
+        num_rows = Highs_getNumRow(self.highs)
+        num_cols = Highs_getNumCol(self.highs)
+        
+        row_status = <HighsInt*> malloc(num_rows * sizeof(HighsInt))
+        col_status = <HighsInt*> malloc(num_cols * sizeof(HighsInt))
+        
+        if row_status == NULL or col_status == NULL:
+            free(row_status)
+            free(col_status)
+            raise MemoryError("Failed to allocate memory")
+        
+        try:
+            sig_on()
+            status = Highs_getBasis(self.highs, col_status, row_status)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to get basis")
+            
+            result = row_status[i]
+        finally:
+            free(row_status)
+            free(col_status)
+        
+        return result
+    
     cpdef int get_col_stat(self, int j) except? -1:
         """
         Retrieve the status of a variable.
@@ -1729,15 +2467,44 @@ cdef class HiGHSBackend(GenericBackend):
             ...
             ValueError: The variable's index j must satisfy 0 <= j < number_of_variables
         """
-        if j < 0 or j >= self.ncols():
+        cdef HighsInt* col_status
+        cdef HighsInt* row_status
+        cdef HighsInt num_cols, num_rows
+        cdef HighsInt status
+        cdef HighsInt result
+        
+        if j < 0 or j >= self.numcols:
             raise ValueError("The variable's index j must satisfy 0 <= j < number_of_variables")
         
-        cdef object basis = self.highs_model.getBasis()
-        if not basis.valid:
-            raise ValueError("No valid basis available. Solve the problem first.")
+        # Note: HiGHS C API doesn't have getBasisValidity function
+        # We'll try to get the basis and handle errors if no basis exists
         
-        return int(basis.col_status[j])
-
+        num_cols = Highs_getNumCol(self.highs)
+        num_rows = Highs_getNumRow(self.highs)
+        
+        col_status = <HighsInt*> malloc(num_cols * sizeof(HighsInt))
+        row_status = <HighsInt*> malloc(num_rows * sizeof(HighsInt))
+        
+        if col_status == NULL or row_status == NULL:
+            free(col_status)
+            free(row_status)
+            raise MemoryError("Failed to allocate memory")
+        
+        try:
+            sig_on()
+            status = Highs_getBasis(self.highs, col_status, row_status)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to get basis")
+            
+            result = col_status[j]
+        finally:
+            free(col_status)
+            free(row_status)
+        
+        return result
+    
     cpdef set_row_stat(self, int i, int stat):
         """
         Set the status of a constraint.
@@ -1781,42 +2548,48 @@ cdef class HiGHSBackend(GenericBackend):
             sage: lp.get_row_stat(0)  
             3
         """
-        if i < 0 or i >= self.nrows():
+        cdef HighsInt* row_status
+        cdef HighsInt* col_status
+        cdef HighsInt num_rows, num_cols
+        cdef HighsInt status
+        cdef int j
+        
+        if i < 0 or i >= self.numrows:
             raise ValueError("The constraint's index i must satisfy 0 <= i < number_of_constraints")
         
         if stat < 0 or stat > 4:
-            raise ValueError("Invalid status value. Must be 0-4 (kLower, kBasic, kUpper, kZero, kNonbasic)")
+            raise ValueError("Invalid status value. Must be 0-4")
         
-        import highspy
+        num_rows = Highs_getNumRow(self.highs)
+        num_cols = Highs_getNumCol(self.highs)
         
-        cdef object old_basis = self.highs_model.getBasis()
+        row_status = <HighsInt*> malloc(num_rows * sizeof(HighsInt))
+        col_status = <HighsInt*> malloc(num_cols * sizeof(HighsInt))
         
-        # Create a fresh HighsBasis object to avoid issues with modifying retrieved basis
-        cdef object new_basis = highspy.HighsBasis()
-        new_basis.valid = True
+        if row_status == NULL or col_status == NULL:
+            free(row_status)
+            free(col_status)
+            raise MemoryError("Failed to allocate memory")
         
-        # Build new status lists - must create the complete list first before assigning
-        # because modifying individual elements after assignment doesn't work with highspy
-        cdef list new_row_status
-        cdef list new_col_status
-        
-        if old_basis.valid:
-            # Copy existing statuses and modify the specific row
-            new_col_status = [s for s in old_basis.col_status]
-            new_row_status = [highspy.HighsBasisStatus(s) if j != i else highspy.HighsBasisStatus(stat)
-                             for j, s in enumerate(old_basis.row_status)]
-        else:
-            # If no valid basis exists, create default values
-            new_col_status = [highspy.HighsBasisStatus.kLower for _ in range(self.ncols())]
-            new_row_status = [highspy.HighsBasisStatus.kBasic if j != i else highspy.HighsBasisStatus(stat)
-                             for j in range(self.nrows())]
-        
-        # Assign the complete lists to the new basis
-        new_basis.col_status = new_col_status
-        new_basis.row_status = new_row_status
-        
-        # Set the new basis
-        self.highs_model.setBasis(new_basis)
+        try:
+            # Get current basis
+            sig_on()
+            status = Highs_getBasis(self.highs, col_status, row_status)
+            sig_off()
+            
+            # Set the new status
+            row_status[i] = stat
+            
+            # Set the modified basis
+            sig_on()
+            status = Highs_setBasis(self.highs, col_status, row_status)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to set basis")
+        finally:
+            free(row_status)
+            free(col_status)
 
     cpdef set_col_stat(self, int j, int stat):
         """
@@ -1858,45 +2631,50 @@ cdef class HiGHSBackend(GenericBackend):
             sage: lp.get_col_stat(0)  
             2
         """
-        if j < 0 or j >= self.ncols():
+        cdef HighsInt* row_status
+        cdef HighsInt* col_status
+        cdef HighsInt num_rows, num_cols
+        cdef HighsInt status
+        
+        if j < 0 or j >= self.numcols:
             raise ValueError("The variable's index j must satisfy 0 <= j < number_of_variables")
         
         if stat < 0 or stat > 4:
-            raise ValueError("Invalid status value. Must be 0-4 (kLower, kBasic, kUpper, kZero, kNonbasic)")
+            raise ValueError("Invalid status value. Must be 0-4")
         
-        import highspy
+        num_rows = Highs_getNumRow(self.highs)
+        num_cols = Highs_getNumCol(self.highs)
         
-        cdef object old_basis = self.highs_model.getBasis()
+        row_status = <HighsInt*> malloc(num_rows * sizeof(HighsInt))
+        col_status = <HighsInt*> malloc(num_cols * sizeof(HighsInt))
         
-        # Create a fresh HighsBasis object to avoid issues with modifying retrieved basis
-        cdef object new_basis = highspy.HighsBasis()
-        new_basis.valid = True
+        if row_status == NULL or col_status == NULL:
+            free(row_status)
+            free(col_status)
+            raise MemoryError("Failed to allocate memory")
         
-        # Build new status lists - must create the complete list first before assigning
-        # because modifying individual elements after assignment doesn't work with highspy
-        cdef list new_col_status
-        cdef list new_row_status
-        
-        if old_basis.valid:
-            # Copy existing statuses and modify the specific column
-            new_col_status = [highspy.HighsBasisStatus(s) if k != j else highspy.HighsBasisStatus(stat)
-                             for k, s in enumerate(old_basis.col_status)]
-            new_row_status = [s for s in old_basis.row_status]
-        else:
-            # If no valid basis exists, create default values
-            new_col_status = [highspy.HighsBasisStatus.kLower if k != j else highspy.HighsBasisStatus(stat)
-                             for k in range(self.ncols())]
-            new_row_status = [highspy.HighsBasisStatus.kBasic for _ in range(self.nrows())]
-        
-        # Assign the complete lists to the new basis
-        new_basis.col_status = new_col_status
-        new_basis.row_status = new_row_status
-        
-        # Set the new basis
-        self.highs_model.setBasis(new_basis)
+        try:
+            # Get current basis
+            sig_on()
+            status = Highs_getBasis(self.highs, col_status, row_status)
+            sig_off()
+            
+            # Set the new status
+            col_status[j] = stat
+            
+            # Set the modified basis
+            sig_on()
+            status = Highs_setBasis(self.highs, col_status, row_status)
+            sig_off()
+            
+            if status != kHighsStatusOk:
+                raise MIPSolverException("HiGHS: Failed to set basis")
+        finally:
+            free(row_status)
+            free(col_status)
     
     cpdef int warm_up(self) noexcept:
-        r"""
+        """
         Warm up the basis using current statuses assigned to rows and cols.
 
         This method attempts to validate and use the currently set basis.
@@ -1927,26 +2705,40 @@ cdef class HiGHSBackend(GenericBackend):
             sage: lp.warm_up()
             0
         """
-        import highspy
+        cdef HighsInt basis_validity
+        cdef HighsInt status
+        cdef HighsInt* col_status
+        cdef HighsInt* row_status
+        cdef HighsInt num_cols, num_rows
         
-        # Get the current basis
-        cdef object basis = self.highs_model.getBasis()
+        # Note: HiGHS C API doesn't have getBasisValidity function
+        # Try to get the basis to check if it's available
+        num_cols = Highs_getNumCol(self.highs)
+        num_rows = Highs_getNumRow(self.highs)
         
-        # Check if the basis is valid
-        if not basis.valid:
+        if num_cols == 0 or num_rows == 0:
             return -1
         
-        # In HiGHS, setting a basis already validates it
-        # So if we have a valid basis, we're good
-        return 0
+        col_status = <HighsInt*> malloc(num_cols * sizeof(HighsInt))
+        row_status = <HighsInt*> malloc(num_rows * sizeof(HighsInt))
+        
+        if col_status == NULL or row_status == NULL:
+            free(col_status)
+            free(row_status)
+            return -1
+        
+        try:
+            status = Highs_getBasis(self.highs, col_status, row_status)
+            if status != kHighsStatusOk:
+                return -1
+            return 0
+        finally:
+            free(col_status)
+            free(row_status)
     
-    cpdef write_lp(self, filename):
+    cpdef __copy__(self):
         """
-        Write the problem to a .lp file.
-
-        INPUT:
-
-        - ``filename`` -- string; the file name
+        Return a copy of ``self``.
 
         EXAMPLES::
 
@@ -1954,31 +2746,55 @@ cdef class HiGHSBackend(GenericBackend):
             sage: p = get_solver(solver='HiGHS')
             sage: p.add_variables(2)            
             1
-            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
-            sage: import tempfile                                     
-            sage: with tempfile.NamedTemporaryFile(suffix='.lp') as f:
-            ....:     p.write_lp(f.name)        
+            sage: q = copy(p)                   
+            sage: q.ncols()                     
+            2
         """
-        self.highs_model.writeModel(str(filename))
-    
-    cpdef write_mps(self, filename, int modern):
-        """
-        Write the problem to a .mps file.
-
-        INPUT:
-
-        - ``filename`` -- string; the file name
-        - ``modern`` -- integer; whether to use modern MPS format (ignored for HiGHS)
-
-        EXAMPLES::
-
-            sage: from sage.numerical.backends.generic_backend import get_solver
-            sage: p = get_solver(solver='HiGHS')
-            sage: p.add_variables(2)            
-            1
-            sage: p.add_linear_constraint([(0, 1), (1, 1)], None, 2.0)
-            sage: import tempfile                                     
-            sage: with tempfile.NamedTemporaryFile(suffix='.mps') as f:
-            ....:     p.write_mps(f.name, 1)    
-        """
-        self.highs_model.writeModel(str(filename))
+        cdef HiGHSBackend p
+        cdef HighsInt status
+        cdef bytes temp_file
+        
+        import tempfile
+        import os
+        
+        p = HiGHSBackend(maximization=self.is_maximization())
+        
+        # If model is empty (no constraints), just copy metadata
+        if self.numrows == 0 and self.numcols > 0:
+            # Add the same number of variables
+            for i in range(self.numcols):
+                lb, ub = self.col_bounds(i)
+                p.add_variable(lb, ub,
+                             self.objective_coefficient(i),
+                             self.is_variable_binary(i),
+                             self.is_variable_continuous(i),
+                             self.is_variable_integer(i),
+                             self.col_name(i))
+        else:
+            # Copy by writing and reading through a temporary MPS file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.mps', delete=False) as f:
+                temp_file = f.name.encode('utf-8')
+            
+            try:
+                status = Highs_writeModel(self.highs, temp_file)
+                if status != kHighsStatusOk:
+                    raise MIPSolverException("HiGHS: Failed to write model for copy")
+                
+                status = Highs_readModel(p.highs, temp_file)
+                if status != kHighsStatusOk:
+                    raise MIPSolverException("HiGHS: Failed to read model for copy")
+                
+                # Turn off logging for the copied model
+                Highs_setBoolOptionValue(p.highs, b"log_to_console", False)
+            finally:
+                if os.path.exists(temp_file.decode('utf-8')):
+                    os.unlink(temp_file.decode('utf-8'))
+        
+        p.prob_name = self.prob_name
+        p.col_name_var = copy(self.col_name_var)
+        p.row_name_var = copy(self.row_name_var)
+        p.numcols = self.numcols
+        p.numrows = self.numrows
+        p.obj_constant_term = self.obj_constant_term
+        
+        return p

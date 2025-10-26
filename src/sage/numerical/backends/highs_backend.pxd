@@ -11,13 +11,15 @@
 from sage.numerical.backends.generic_backend cimport GenericBackend
 
 cdef class HiGHSBackend(GenericBackend):
-    cdef object highs_model
+    cdef void* highs
     cdef str prob_name
     cdef dict col_name_var
     cdef dict row_name_var
     cdef dict row_data_cache
     cdef int numcols
     cdef int numrows
+    cdef void _get_col_bounds(self, int col, double* lb, double* ub) except *
+    cdef void _get_row_bounds(self, int row, double* lb, double* ub) except *
     cpdef __copy__(self)
     cpdef get_row_prim(self, int i)
     cpdef double get_row_dual(self, int i) except? -1
@@ -27,3 +29,5 @@ cdef class HiGHSBackend(GenericBackend):
     cpdef set_row_stat(self, int i, int stat)
     cpdef set_col_stat(self, int j, int stat)
     cpdef int warm_up(self) noexcept
+    cpdef int add_variable_with_type(self, int vtype, lower_bound=*, upper_bound=*, 
+                                     obj=*, name=*) except -1
