@@ -984,19 +984,22 @@ cdef class RecursivelyEnumeratedSet_symmetric(RecursivelyEnumeratedSet_generic):
 
         sage: f = lambda a: [a-1,a+1]
         sage: C = RecursivelyEnumeratedSet([0], f, structure='symmetric')
-        sage: loads(dumps(C))
-        Traceback (most recent call last):
-        ...
-        PicklingError: ...
+        sage: from _pickle import PicklingError
+        sage: try:
+        ....:     loads(dumps(C))
+        ....: except PicklingError as e:
+        ....:     print("PicklingError caught")
+        PicklingError caught
 
     This works in the command line but apparently not as a doctest::
 
         sage: def f(a): return [a-1,a+1]
         sage: C = RecursivelyEnumeratedSet([0], f, structure='symmetric')
-        sage: loads(dumps(C))
-        Traceback (most recent call last):
-        ...
-        PicklingError: ...
+        sage: try:
+        ....:     loads(dumps(C))
+        ....: except PicklingError as e:
+        ....:     print("PicklingError caught")
+        PicklingError caught
     """
 
     def breadth_first_search_iterator(self, max_depth=None):
@@ -1719,10 +1722,12 @@ class RecursivelyEnumeratedSet_forest(Parent):
             sage: def children(x):
             ....:     return [x + 1]
             sage: S = RecursivelyEnumeratedSet_forest([1], children, category=InfiniteEnumeratedSets())
-            sage: dumps(S)
-            Traceback (most recent call last):
-            ...
-            PicklingError: Can't pickle <...function...>: attribute lookup ... failed
+            sage: from _pickle import PicklingError
+            sage: try:
+            ....:     dumps(S)
+            ....: except PicklingError as e:
+            ....:     print("PicklingError caught")
+            PicklingError caught
 
         Let us now fake ``children`` being defined in a Python module::
 

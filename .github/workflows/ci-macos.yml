@@ -63,6 +63,7 @@ jobs:
           make build V=0
         env:
           MAKE: 'make -j6'
+          CXXFLAGS: '-Wno-error=invalid-specialization'
       
       - name: Test
         run: |

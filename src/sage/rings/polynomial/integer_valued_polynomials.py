@@ -262,7 +262,7 @@ class IntegerValuedPolynomialRing(UniqueRepresentation, Parent):
                 return self.algebra_generators()[0]
 
             @cached_method
-            def algebra_generators(self):
+            def algebra_generators(self) -> Family:
                 r"""
                 Return the generators of this algebra.
 
@@ -456,7 +456,7 @@ class IntegerValuedPolynomialRing(UniqueRepresentation, Parent):
             sage: 1 - S[2] * S[2] / 2
             S[0] - 1/2*S[2] + 3*S[3] - 3*S[4]
         """
-        def __init__(self, A):
+        def __init__(self, A) -> None:
             r"""
             Initialize ``self``.
 

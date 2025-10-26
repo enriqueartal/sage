@@ -996,6 +996,87 @@ cdef class LazyImport():
         except ImportError:
             return False
 
+    def __reduce__(self):
+        """
+        Support pickling by forcing resolution of the LazyImport.
+
+        When a LazyImport is pickled, we force resolution and return the
+        actual imported object for pickling instead of the LazyImport wrapper.
+        This ensures that unpickling returns the actual object.
+
+        EXAMPLES::
+
+            sage: from sage.misc.lazy_import import LazyImport
+            sage: from pickle import loads, dumps
+            sage: lazy_ZZ = LazyImport('sage.rings.integer_ring', 'ZZ')
+            sage: restored = loads(dumps(lazy_ZZ))
+            sage: type(restored)
+            <class 'sage.rings.integer_ring.IntegerRing_class'>
+
+        The restored object is the actual imported object::
+
+            sage: restored is ZZ
+            True
+            sage: restored(42)
+            42
+
+        Test equality after unpickling::
+
+            sage: lazy_QQ = LazyImport('sage.rings.rational_field', 'QQ')
+            sage: restored_QQ = loads(dumps(lazy_QQ))
+            sage: restored_QQ is QQ
+            True
+
+        Pickling works even after the lazy import has been used::
+
+            sage: lazy_Integer = LazyImport('sage.rings.integer', 'Integer')
+            sage: val = lazy_Integer(5)
+            sage: type(lazy_Integer)
+            <class 'sage.misc.lazy_import.LazyImport'>
+            sage: restored_Integer = loads(dumps(lazy_Integer))
+            sage: type(restored_Integer).__name__
+            'InheritComparisonMetaclass'
+            sage: restored_Integer is Integer
+            True
+            sage: restored_Integer(10)
+            10
+        """
+        # Force resolution and return a function that reconstructs the actual object
+        # We use a simple approach: return the actual object's reduction
+        obj = self.get_object()
+        reduce_ex=getattr(obj, '__reduce_ex__', None)
+        if callable(reduce_ex):
+            try:
+                return reduce_ex(pickle.HIGHEST_PROTOCOL)
+            except Exception:
+                pass
+        reduce_fn = getattr(obj, '__reduce__', None)
+        if reduce_fn is not None:
+            try:
+                result = reduce_fn()
+                if isinstance(result,tuple):
+                    return result
+            except Exception:
+                pass
+        # (Fall back) For most objects, we can use pickle's default mechanism
+        # by returning a function that will retrieve the object
+        return (_restore_lazy_import, (self._module, self._name))
+
+
+def _restore_lazy_import(module, name):
+    """
+    Helper function to restore a lazy import during unpickling.
+    
+    This retrieves the actual object from the module.
+    
+    EXAMPLES::
+    
+        sage: from sage.misc.lazy_import import _restore_lazy_import
+        sage: _restore_lazy_import('sage.rings.integer_ring', 'ZZ')
+        Integer Ring
+    """
+    return getattr(__import__(module, {}, {}, [name]), name)
+
 
 def lazy_import(module, names, as_=None, *,
                 at_startup=False, namespace=None,
