@@ -51,7 +51,6 @@ extension_data = {
   'generic_sdp_backend' : files('generic_sdp_backend.pyx'),
   'glpk_backend' : files('glpk_backend.pyx'),
   'glpk_exact_backend' : files('glpk_exact_backend.pyx'),
-  'highs_backend' : files('highs_backend.pyx'),
   'glpk_graph_backend' : files('glpk_graph_backend.pyx'),
   'highs_backend' : files('highs_backend.pyx'),
   'interactivelp_backend' : files('interactivelp_backend.pyx'),
