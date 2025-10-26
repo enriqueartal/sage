@@ -2,7 +2,8 @@
 glpk = cc.find_library('glpk', required: not is_windows, disabler: true)
 highs = cc.find_library('highs', required: not is_windows, disabler: true)
 highs_inc = include_directories(
-  join_paths(get_option('prefix'), 'include')
+  join_paths(get_option('prefix'), 'include'),
+  join_paths(get_option('prefix'), 'include', 'highs')
 )
 
 py.install_sources(
