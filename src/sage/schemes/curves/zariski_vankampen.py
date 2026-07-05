@@ -63,7 +63,7 @@ from sage.rings.complex_mpfr import ComplexField
 from sage.rings.integer_ring import ZZ
 from sage.rings.number_field.number_field import NumberField
 from sage.rings.polynomial.polynomial_ring_constructor import PolynomialRing
-from sage.rings.qqbar import QQbar
+from sage.rings.qqbar import QQbar, number_field_elements_from_algebraics
 from sage.rings.rational_field import QQ
 from sage.rings.real_mpfr import RealField
 from sage.schemes.curves.constructor import Curve
@@ -657,14 +657,17 @@ def fieldI(field: NumberField) -> NumberField:
         sage: QuadraticField(-1) == fieldI(QuadraticField(-1))
         True
     """
-    I0 = QQbar.gen()
-    if I0 in field:
+    if field == QQ:
+        return QQ[QQbar.gen()]
+    if QQbar.gen() in field:
         return field
+    I0 = QQbar.gen()
     field_a = field[I0]
     field_b = field_a.absolute_field('b0')
     b0 = field_b.gen()
     q = b0.minpoly()
-    qembd = field_b.embeddings(QQbar)
+    L = q.roots(QQbar, multiplicities=False)
+    qembd = [field_b.hom(codomain=QQbar, im_gens=[c]) for c in L]
     for h1 in qembd:
         b1 = h1(b0)
         b2 = h1(field_b(field_a.gen(0)))
@@ -870,13 +873,15 @@ def braid_in_segment(glist, x0, x1, precision={}):
     """
     precision1 = precision.copy()
     g = prod(glist)
-    F1 = g.base_ring()
+    F1 = fieldI(g.base_ring())
+    g = g.change_ring(F1)
+    glist1 = [f.change_ring(F1) for f in glist]
     x, y = g.parent().gens()
     intervals = {}
     if not precision1:
-        precision1 = {f: 53 for f in glist}
+        precision1 = {f: 53 for f in glist1}
     y0s = []
-    for f in glist:
+    for f in glist1:
         if f.variables() == (y,):
             f0 = F1[y](f)
         else:
@@ -903,8 +908,8 @@ def braid_in_segment(glist, x0, x1, precision={}):
     finalstrands = []
     initialintervals = roots_interval_cached(g, x0)
     finalintervals = roots_interval_cached(g, x1)
-    I1 = QQbar.gen()
     for cs in complexstrands:
+        I1 = ComplexField(prec=max(precision1.values())).gen()
         ip = cs[0][1] + I1 * cs[0][2]
         fp = cs[-1][1] + I1 * cs[-1][2]
         matched = 0
