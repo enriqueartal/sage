@@ -28,7 +28,7 @@ EXAMPLES::
     sage: R.<x, y> = QQ[]
     sage: f = y^3 + x^3 - 1
     sage: braid_monodromy(f)
-    ([s1*s0, s1*s0, s1*s0], {0: 0, 1: 0, 2: 0}, {}, 3)
+    ([s1*s0, s1*s0, s1*s0], {0: 0, 1: 0, 2: 0}, {}, 3, -5/2*I + 5/2)
     sage: fundamental_group(f)
     Finitely presented group < x0 |  >
 """
@@ -1251,6 +1251,8 @@ def braid_monodromy(f, arrangement=(), vertical=False) -> tuple:
     - A nonnegative integer: the number of strands of the braids,
       only necessary if the list of braids is empty.
 
+    - A Gauss rational: the base point of the monodromy.
+
     .. NOTE::
 
         The projection over the `x` axis is used if there are no vertical
@@ -1268,7 +1270,8 @@ def braid_monodromy(f, arrangement=(), vertical=False) -> tuple:
         ([s1*s0*(s1*s2)^2*s0*s2^2*s0^-1*(s2^-1*s1^-1)^2*s0^-1*s1^-1,
           s1*s0*(s1*s2)^2*(s0*s2^-1*s1*s2*s1*s2^-1)^2*(s2^-1*s1^-1)^2*s0^-1*s1^-1,
           s1*s0*(s1*s2)^2*s2*s1^-1*s2^-1*s1^-1*s0^-1*s1^-1,
-          s1*s0*s2*s0^-1*s2*s1^-1], {0: 0, 1: 0, 2: 0, 3: 0}, {}, 4)
+          s1*s0*s2*s0^-1*s2*s1^-1], {0: 0, 1: 0, 2: 0, 3: 0}, {}, 4,
+          -177401836337599439/15279164453577791*I + 177401836337599439/15279164453577791)
         sage: flist = (x^2 - y^3, x + 3*y - 5)
         sage: bm1 = braid_monodromy(f, arrangement=flist)
         sage: bm1[0] == bm[0]
@@ -1276,20 +1279,20 @@ def braid_monodromy(f, arrangement=(), vertical=False) -> tuple:
         sage: bm1[1]
         {0: 0, 1: 1, 2: 0, 3: 0}
         sage: braid_monodromy(R(1))
-        ([], {}, {}, 0)
+        ([], {}, {}, 0, 0)
         sage: braid_monodromy(x*y^2 - 1)
-        ([s0*s1*s0^-1*s1*s0*s1^-1*s0^-1, s0*s1*s0^-1, s0], {0: 0, 1: 0, 2: 0}, {}, 3)
+        ([s0*s1*s0^-1*s1*s0*s1^-1*s0^-1, s0*s1*s0^-1, s0], {0: 0, 1: 0, 2: 0}, {}, 3,
+         -490578559/114627502*I + 490578559/114627502)
         sage: L = [x, y, x - 1, x -y]
         sage: braid_monodromy(prod(L), arrangement=L, vertical=True)
-        ([s^2, 1], {0: 1, 1: 3}, {0: 0, 1: 2}, 2)
+        ([s^2, 1], {0: 1, 1: 3}, {0: 0, 1: 2}, 2, -1/2*I + 1/2)
     """
     F = fieldI(f.base_ring())
     I1 = F(QQbar.gen())
-    f = f.change_ring(F)
     if not arrangement:
         arrangement1 = (f,)
     else:
-        arrangement1 = tuple(g.change_ring(F) for g in arrangement)
+        arrangement1 = tuple(g for g in arrangement)
     x, y = f.parent().gens()
     if vertical:
         indices_v = vertical_lines_in_braidmon(arrangement1)
@@ -1340,12 +1343,15 @@ def braid_monodromy(f, arrangement=(), vertical=False) -> tuple:
                 strands1[j] = k
         else:
             strands1 = {}
-        return (result, strands1, vertical_braids, d)
+        return (result, strands1, vertical_braids, d, 0)
     V = corrected_voronoi_diagram(tuple(disc))
     G, E, p, EC, DG, VR = voronoi_cells(V, vertical_lines=vl)
     p0 = (p[0], p[1])
     p1 = p0[0] + I1 * p0[1]
-    roots_base, strands = strand_components(g, arrangement_h, p1)
+    gF = g.change_ring(F)
+    arrangement_hF = tuple(g0.change_ring(F) for g0 in arrangement_h)
+    glistF = tuple(g0.change_ring(F) for g0 in glist)
+    roots_base, strands = strand_components(gF, arrangement_hF, p1)
     strands1 = {}
     for j in range(d):
         i = strands[j]
@@ -1360,12 +1366,12 @@ def braid_monodromy(f, arrangement=(), vertical=False) -> tuple:
     I0 = QQbar.gen()
     segs = [(a[0] + I0 * a[1], b[0] + I0 * b[1]) for a, b in segs_set]
     vertices = list(set(flatten(segs)))
-    tocacheverts = tuple([(g, v) for v in vertices])
+    tocacheverts = tuple([(gF, v) for v in vertices])
     populate_roots_interval_cache(tocacheverts)
     end_braid_computation = False
     while not end_braid_computation:
         try:
-            braidscomputed = braid_in_segment([(glist, seg[0], seg[1])
+            braidscomputed = braid_in_segment([(glistF, seg[0], seg[1])
                                                for seg in segs])
             segsbraids = {}
             for braidcomputed in braidscomputed:
@@ -1398,7 +1404,7 @@ def braid_monodromy(f, arrangement=(), vertical=False) -> tuple:
             vertical_braids[r + t] = transversal[f0]
             t += 1
             result.append(B.one())
-    return (result, strands1, vertical_braids, d)
+    return (result, strands1, vertical_braids, d, p1)
 
 
 def conjugate_positive_form(braid) -> list[list]:
@@ -1943,7 +1949,7 @@ def fundamental_group_arrangement(flist, simplified=True, projective=False,
         dv = {j: j for j, f in flist1}
         d1 = 0
     else:
-        bm, dic, dv, d1 = braid_monodromy(f, flist1, vertical=vertical)
+        bm, dic, dv, d1, p1 = braid_monodromy(f, flist1, vertical=vertical)
     vert_lines = list(dv)
     vert_lines.sort()
     for i, j in enumerate(vert_lines):
