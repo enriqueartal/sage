@@ -1287,7 +1287,8 @@ def braid_monodromy(f, arrangement=(), vertical=False) -> tuple:
         sage: braid_monodromy(prod(L), arrangement=L, vertical=True)
         ([s^2, 1], {0: 1, 1: 3}, {0: 0, 1: 2}, 2, -1/2*I + 1/2)
     """
-    F = fieldI(f.base_ring())
+    F0 = f.base_ring()
+    F = fieldI(F0)
     I1 = F(QQbar.gen())
     if not arrangement:
         arrangement1 = (f,)
