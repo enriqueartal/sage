@@ -1355,10 +1355,10 @@ def integral_vectors(scone):
                 v[i] = v[i] - v[i].floor()
             return v
         # Now, we scale and we return to the canonical basis
-        L = map(lambda v: V * v, map(escale, coords))
+        L = [V * escale(v) for v in coords]
         # Finally, we find the integral vectors of own region
-        integrals = map(lambda v: matrix(QQ, A) * v, list(map(floor, L)))
-    return list(integrals)
+        integrals = [matrix(QQ, A) * floor(v) for v in L]
+    return integrals
 
 
 def multiplicity(scone):
@@ -1740,48 +1740,47 @@ def face_index(M2_gens, vertices, rays=(), structure=False, check=False):
     """
     if M2_gens is None:
         return 1
+    # M_2: basis matrix A (columns = basis vectors, coordinates in M_1 = ZZ^n)
+    gens = [vector(ZZ, g) for g in M2_gens]
+    n = len(gens[0])
+    M2 = (ZZ**n).span(gens)
+    if M2.rank() != n:
+        raise ValueError("M_2 must have full rank n (finite index in ZZ^n)")
+    A = M2.basis_matrix().transpose()
+    if len(vertices) == 0:
+        return A.det()
+
+    # η': spanned by the differences of vertices (and the rays)
+    V = [vector(QQ, v) for v in vertices]
+    dirs = [v - V[0] for v in V[1:]] + [vector(QQ, r) for r in rays]
+    dirs = [w for w in dirs if w != 0]
+    d = matrix(QQ, dirs).rank() if dirs else 0
+    if d == 0:                                   # η is a vertex
+        return (Integer(1), []) if structure else Integer(1)
+
+    W = matrix(QQ, dirs)
+    W = (W.denominator() * W).change_ring(ZZ)    # integer rows spanning η'
+
+    # Equations of `\eta'`: rows of `C` form a \ZZ-basis of `\eta'^\perp \cap ZZ^n
+    # (an integer kernel is saturated, so g(C) = 1)
+    C = W.right_kernel_matrix()                  # (n-d) x n
+
+    # Basis of L_2 = M_2 \cap \eta': columns of A*K, K a ZZ-basis of ker_ZZ(C*A)
+    if d == n:
+        K = identity_matrix(ZZ, n)
     else:
-        # M_2: basis matrix A (columns = basis vectors, coordinates in M_1 = ZZ^n)
-        gens = [vector(ZZ, g) for g in M2_gens]
-        n = len(gens[0])
-        M2 = (ZZ**n).span(gens)
-        if M2.rank() != n:
-            raise ValueError("M_2 must have full rank n (finite index in ZZ^n)")
-        A = M2.basis_matrix().transpose()
-        if len(vertices) == 0:
-            return A.det()
+        K = (C * A).right_kernel_matrix().transpose()   # n x d
+    L2 = A * K                                           # n x d
 
-        # η': spanned by the differences of vertices (and the rays)
-        V = [vector(QQ, v) for v in vertices]
-        dirs = [v - V[0] for v in V[1:]] + [vector(QQ, r) for r in rays]
-        dirs = [w for w in dirs if w != 0]
-        d = matrix(QQ, dirs).rank() if dirs else 0
-        if d == 0:                                   # η is a vertex
-            return (Integer(1), []) if structure else Integer(1)
+    # L_1 = M_1 \cap \eta' is the saturation of L_2, so the index is the product
+    # of the elementary divisors of L2 (= gcd of its d x d minors)
+    S = L2.smith_form()[0]
+    divs = [abs(S[i, i]) for i in range(d)]
+    index = prod(divs)
 
-        W = matrix(QQ, dirs)
-        W = (W.denominator() * W).change_ring(ZZ)    # integer rows spanning η'
-
-        # Equations of `\eta'`: rows of `C` form a \ZZ-basis of `\eta'^\perp \cap ZZ^n
-        # (an integer kernel is saturated, so g(C) = 1)
-        C = W.right_kernel_matrix()                  # (n-d) x n
-
-        # Basis of L_2 = M_2 \cap \eta': columns of A*K, K a ZZ-basis of ker_ZZ(C*A)
-        if d == n:
-            K = identity_matrix(ZZ, n)
-        else:
-            K = (C * A).right_kernel_matrix().transpose()   # n x d
-        L2 = A * K                                           # n x d
-
-        # L_1 = M_1 \cap \eta' is the saturation of L_2, so the index is the product
-        # of the elementary divisors of L2 (= gcd of its d x d minors)
-        S = L2.smith_form()[0]
-        divs = [abs(S[i, i]) for i in range(d)]
-        index = prod(divs)
-
-        if structure:
-            return index, sorted(x for x in divs if x != 1)
-        return QQ(index)
+    if structure:
+        return index, sorted(x for x in divs if x != 1)
+    return QQ(index)
 
 
 def face_volume(f, tau):
