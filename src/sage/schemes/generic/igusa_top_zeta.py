@@ -204,14 +204,14 @@ class ZetaFunctions():
 
     def actual_faces(self, d=1, compact=False):
         r"""
-        Return the list of faces taking ``d`` and ``local`` into account.
+        Return the list of faces taking ``d`` and ``compact`` into account.
 
         INPUT:
 
         - ``d`` -- positive integer (default: ``1``), integer to decide
           which character is used to compute the Zeta functions
 
-        - ``local`` -- boolean (default: ``False``), looks only for info about
+        - ``compact`` -- boolean (default: ``False``), looks only for info about
           compact faces
         """
         P = self._Gammaf
@@ -1649,8 +1649,8 @@ def Jtau(tau, weights, ring_s):
     - ``J_tau`` is a rational function in ``s``.
 
     - ``cone_info`` containing a
-    string of information about the cones, simplicial partition,
-    multiplicity and integral points (see [DL92]_).
+        string of information about the cones, simplicial partition,
+        multiplicity and integral points (see [DL92]_).
 
     EXAMPLES::
 
