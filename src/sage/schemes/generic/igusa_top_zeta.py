@@ -1,6 +1,6 @@
 """
-COMPUTING (LOCAL) IGUSA AND TOPOLOGICAL ZETA FUNCTIONS
-FOR NEWTON NON-DEGENERATED POLYNOMIALS
+IGUSA AND TOPOLOGICAL ZETA FUNCTIONS
+Computing (local) for Newton non-degenerated polynomials
 """
 
 #######################################################################
@@ -112,7 +112,7 @@ class ZetaFunctions():
 
     EXAMPLES::
 
-        sage: R.<x,y,z> = QQ[]
+        sage: R.<x, y, z> = QQ[]
         sage: zex = ZetaFunctions(x^2 + y*z)
         sage: zex.give_info_newton()
         Newton's polyhedron of x^2 + y*z:
@@ -143,9 +143,9 @@ class ZetaFunctions():
         (If all Vol(tau) are 0, where tau runs through the selected faces
          that are no vertices, then the expected order of -1 is 0).
 
-        sage: R.<x,y,z> = QQ[]
+        sage: R.<x, y, z> = QQ[]
         sage: M = [(1, 1, 0), (0, 2, 0), (0, 0, 1)] #lattice of a (2;1,1,0) quot. sing
-        sage: zexQuot = ZetaFunctions(z^2-x*y^3,M)
+        sage: zexQuot = ZetaFunctions(z^2-x*y^3, M)
         sage: zexQuot.topological_zeta(local=True).factor()
         (s + 5/6)^-1 * (s + 1)^-1 * (s + 5/3)
 
@@ -1530,11 +1530,11 @@ def Ltau(f, tau, p, abs_Ntau, s):
     EXAMPLES::
 
         sage: from sage.schemes.generic.igusa_top_zeta import newton_polyhedron, Ltau
-        sage: R.<x,y,z> = QQ[]
+        sage: R.<x, y, z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f)
         sage: s = var('s')
-        sage: [Ltau(f,tau,5,0,s) for tau in P.faces(1)]
+        sage: [Ltau(f, tau, 5, 0, s) for tau in P.faces(1)]
         [(16/125*(3*5^(s + 1) + 1)/(5^(s + 1) - 1), 16),
          (32/125*(5^(s + 1) + 3)/(5^(s + 1) - 1), 32),
          (16/125*(3*5^(s + 1) + 1)/(5^(s + 1) - 1), 16),
@@ -1560,17 +1560,17 @@ def Lgamma(f, p, abs_Ngamma, s):
     Return the value `L_{\Gamma}` for the total polyhedron `\Gamma` in
     terms of a symbolic variable `s`.
 
-    ``abs_Ngamma`` is the corresponding ``Ngamma`` value for abstract
-    prime ``p`` (see [DH01]_).
+    The value ``abs_Ngamma`` is the corresponding ``Ngamma`` value for abstract
+    prime `p` (see [DH01]_).
 
     EXAMPLES::
 
         sage: from sage.schemes.generic.igusa_top_zeta import newton_polyhedron, Lgamma
-        sage: R.<x,y,z> = QQ[]
+        sage: R.<x, y, z> = QQ[]
         sage: f = x^2 - y^2 + z^3
         sage: P = newton_polyhedron(f)
         sage: s = var('s')
-        sage: Lgamma(f,7,0,s)
+        sage: Lgamma(f, 7, 0, s)
         -24/49*(7^s - 1)/(7*7^s - 1) + 216/343
     """
     n = f.parent().ngens()
@@ -1630,17 +1630,33 @@ def Stau(f, tau, p, weights, s):
 # Calculation of the expression Jtau defined in paper [DL92]
 def Jtau(tau, weights, ring_s):
     r"""
-    Return a list ``[J_tau, cone_info]`` with ``cone_info`` containing a
-    string of information about the cones, simplicial partition,
-    multiplicity and integral points. (see [DL92]_)
+    Return a list ``[J_tau, cone_info]``
 
-    Value ``J_tau`` is a rational function in ``s``.
+    INPUT:
+
+    - ``tau`` -- a face of a Newton polyhedron ``P``
+
+    - ``weights`` -- list (default: ``None``),
+        an `n`-list of positive integers
+        `[w_1,\ldots,w_n]` representing the volume form
+        `x_1^{w_1-1}\cdots x_n^{w_n-1}\ dx_1\wedge\cdots\wedge dx_n`;
+        if set to ``None``, ``w_i = 1``
+
+    - ``ring_s`` -- a polynomial ring in one variable
+
+    OUTPUT:
+
+    - ``J_tau`` is a rational function in ``s``.
+
+    - ``cone_info`` containing a
+    string of information about the cones, simplicial partition,
+    multiplicity and integral points (see [DL92]_).
 
     EXAMPLES::
 
         sage: from sage.schemes.generic.igusa_top_zeta import newton_polyhedron, proper_faces, face_divisors, Jtau
-        sage: R.<x,y,z> = QQ[]
-        sage: f=x^2 + y*z
+        sage: R.<x, y ,z> = QQ[]
+        sage: f = x^2 + y*z
         sage: S.<s> = QQ[]
         sage: P=newton_polyhedron(f)
         sage: faces_set = proper_faces(P)
